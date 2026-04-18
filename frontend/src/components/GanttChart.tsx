@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   addWeeks, startOfISOWeek, getISOWeek, getISOWeekYear,
   parseISO, isWithinInterval, addDays, format, getMonth, getYear,
+  startOfMonth, endOfMonth, addMonths,
 } from 'date-fns'
 import { Trash2, Plus, Pencil, Check, X as XIcon, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -28,6 +29,7 @@ const COLS = [
 
 const ACTION_W = 76
 const WEEK_W   = 32
+const MONTH_W  = 60
 
 function colLeft(i: number) {
   let l = ACTION_W
@@ -118,6 +120,53 @@ function cellState(a: Activity, w: WeekInfo): CellState {
   }
 }
 
+// ── Month helpers ─────────────────────────────────────────────────────────────
+interface MonthInfo { year: number; month: number; firstDay: Date; lastDay: Date }
+
+function generateMonths(activities: Activity[], buf = 2): MonthInfo[] {
+  const dates: Date[] = []
+  activities.forEach(a => {
+    if (a.start_date)      dates.push(parseISO(a.start_date))
+    if (a.end_date)        dates.push(parseISO(a.end_date))
+    if (a.completion_date) dates.push(parseISO(a.completion_date))
+  })
+  const now = new Date()
+  const min = dates.length ? dates.reduce((a,b)=>a<b?a:b) : addMonths(now,-3)
+  const max = dates.length ? dates.reduce((a,b)=>a>b?a:b) : addMonths(now,6)
+  const start = startOfMonth(addMonths(min,-buf))
+  const end   = startOfMonth(addMonths(max, buf))
+  const months: MonthInfo[] = []
+  let cur = start
+  while (cur <= end) {
+    months.push({ year:getYear(cur), month:getMonth(cur), firstDay:startOfMonth(cur), lastDay:endOfMonth(cur) })
+    cur = addMonths(cur, 1)
+  }
+  return months
+}
+
+function buildMonthYearGroups(months: MonthInfo[]): Group[] {
+  const res: Group[] = []; let cur='',cnt=0
+  months.forEach(m => {
+    const k = String(m.year)
+    if (k!==cur) { if(cur) res.push({key:cur,label:`${cur}년`,count:cnt}); cur=k; cnt=1 } else cnt++
+  })
+  if (cur) res.push({key:cur,label:`${cur}년`,count:cnt})
+  return res
+}
+
+function monthCellState(a: Activity, m: MonthInfo): CellState {
+  const first=m.firstDay, last=m.lastDay
+  const inMonth=(s:string|null)=>!!s&&parseISO(s)>=first&&parseISO(s)<=last
+  const sd=a.start_date?parseISO(a.start_date):null
+  const ed=a.end_date?parseISO(a.end_date):null
+  return {
+    inRange: sd&&ed ? !(ed<first)&&!(sd>last) : false,
+    isStart:      inMonth(a.start_date),
+    isEnd:        inMonth(a.end_date),
+    isCompletion: inMonth(a.completion_date),
+  }
+}
+
 // ── Draft row ─────────────────────────────────────────────────────────────────
 interface DraftRow {
   _id:string; tech_item_id:number|null; name:string
@@ -174,8 +223,10 @@ export function GanttChart() {
   const qc = useQueryClient()
   const [actModal,  setActModal]  = useState<{open:boolean;activity?:Activity}>({open:false})
   const [draftRows, setDraftRows] = useState<DraftRow[]>([])
-  const savingRef   = useRef<Set<string>>(new Set())
-  const fixedRef    = useRef<Set<number>>(new Set())
+  const [viewUnit,  setViewUnit]  = useState<'week'|'month'>('week')
+  const savingRef    = useRef<Set<string>>(new Set())
+  const fixedRef     = useRef<Set<number>>(new Set())
+  const viewUnitRef  = useRef<'week'|'month'>('week')
 
   // ── Drag state (ref for stable closure + state for re-render) ──
   const [dragging,    setDraggingState] = useState<DragState|null>(null)
@@ -230,10 +281,15 @@ export function GanttChart() {
     )).then(()=>{ invalidate(); if(toFix.length) toast.success(`${toFix.length}개 상태 자동 보정`) })
   },[activities])
 
-  const weeks   = useMemo(()=>generateWeeks(sorted),[sorted])
-  const yGroups = useMemo(()=>buildYearGroups(weeks),[weeks])
-  const mGroups = useMemo(()=>buildMonthGroups(weeks),[weeks])
-  const nowW    = useMemo(()=>({y:getISOWeekYear(new Date()),w:getISOWeek(new Date())}),[])
+  useEffect(()=>{ viewUnitRef.current = viewUnit },[viewUnit])
+
+  const weeks      = useMemo(()=>generateWeeks(sorted),[sorted])
+  const yGroups    = useMemo(()=>buildYearGroups(weeks),[weeks])
+  const mGroups    = useMemo(()=>buildMonthGroups(weeks),[weeks])
+  const nowW       = useMemo(()=>({y:getISOWeekYear(new Date()),w:getISOWeek(new Date())}),[])
+  const months     = useMemo(()=>viewUnit==='month'?generateMonths(sorted):[]  ,[sorted,viewUnit])
+  const mYearGroups= useMemo(()=>buildMonthYearGroups(months),[months])
+  const nowM       = useMemo(()=>({y:getYear(new Date()),m:getMonth(new Date())}),[])
 
   const { editing, draft, setDraft, startEdit, commitEdit, saveField, cancelEdit } =
     useInlineEdit(selectedProjectId, selectedTechItemId)
@@ -256,9 +312,10 @@ export function GanttChart() {
   useEffect(()=>{
     const onMove=(e:MouseEvent)=>{
       const d=draggingRef.current; if(!d) return
-      const wkDelta=Math.round((e.clientX-d.startX)/WEEK_W)
-      if(wkDelta!==d.currentWeekDelta) {
-        const nd={...d,currentWeekDelta:wkDelta}; draggingRef.current=nd; setDraggingState(nd)
+      const unitW = viewUnitRef.current==='month' ? MONTH_W : WEEK_W
+      const delta=Math.round((e.clientX-d.startX)/unitW)
+      if(delta!==d.currentWeekDelta) {
+        const nd={...d,currentWeekDelta:delta}; draggingRef.current=nd; setDraggingState(nd)
       }
     }
     const onUp=()=>{
@@ -267,7 +324,10 @@ export function GanttChart() {
       document.body.style.cursor=''; document.body.style.userSelect=''
       if(d.currentWeekDelta===0) return
       const a=activitiesRef.current.find(x=>x.id===d.activityId); if(!a) return
-      const shift=(dt:string|null)=>dt?format(addWeeks(parseISO(dt),d.currentWeekDelta),'yyyy-MM-dd'):null
+      const isMonth = viewUnitRef.current==='month'
+      const shift=(dt:string|null)=>dt?format(
+        isMonth?addMonths(parseISO(dt),d.currentWeekDelta):addWeeks(parseISO(dt),d.currentWeekDelta),
+        'yyyy-MM-dd'):null
       let ns=a.start_date, ne=a.end_date
       if(d.type==='start')      ns=shift(d.origStartDate)
       else if(d.type==='end')   ne=shift(d.origEndDate)
@@ -291,11 +351,14 @@ export function GanttChart() {
   // Preview: compute temporary dates while dragging
   const previewAct = useCallback((a:Activity):Activity=>{
     const d=dragging; if(!d||d.activityId!==a.id||d.currentWeekDelta===0) return a
-    const shift=(dt:string|null)=>dt?format(addWeeks(parseISO(dt),d.currentWeekDelta),'yyyy-MM-dd'):null
+    const isMonth = viewUnit==='month'
+    const shift=(dt:string|null)=>dt?format(
+      isMonth?addMonths(parseISO(dt),d.currentWeekDelta):addWeeks(parseISO(dt),d.currentWeekDelta),
+      'yyyy-MM-dd'):null
     if(d.type==='start') return {...a,start_date:shift(d.origStartDate)}
     if(d.type==='end')   return {...a,end_date:shift(d.origEndDate)}
     return {...a,start_date:shift(d.origStartDate),end_date:shift(d.origEndDate)}
-  },[dragging])
+  },[dragging,viewUnit])
 
   // ── Draft management ──────────────────────────────────────────
   const addDraftRow   = (tiId?:number)=>setDraftRows(prev=>[...prev,{...emptyDraft(techItems,selectedTechItemId),tech_item_id:tiId??selectedTechItemId??techItems[0]?.id??null}])
@@ -346,7 +409,10 @@ export function GanttChart() {
   const DragTooltip = ()=>{
     if (!dragging||dragging.currentWeekDelta===0) return null
     const a=sorted.find(x=>x.id===dragging.activityId); if(!a) return null
-    const shift=(dt:string|null)=>dt?format(addWeeks(parseISO(dt),dragging.currentWeekDelta),'MM/dd'):null
+    const isMonth = viewUnit==='month'
+    const shift=(dt:string|null)=>dt?format(
+      isMonth?addMonths(parseISO(dt),dragging.currentWeekDelta):addWeeks(parseISO(dt),dragging.currentWeekDelta),
+      'MM/dd'):null
     const label = dragging.type==='start' ? `시작: ${shift(dragging.origStartDate)}`
       : dragging.type==='end' ? `종료: ${shift(dragging.origEndDate)}`
       : `${shift(dragging.origStartDate)} ~ ${shift(dragging.origEndDate)}`
@@ -372,7 +438,22 @@ export function GanttChart() {
           )}
         </span>
         <span className="text-[11px] text-slate-400 hidden md:block">· 바를 드래그하여 날짜 조정</span>
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex items-center gap-2">
+          {/* 주/월 토글 */}
+          <div className="flex rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden text-[12px]">
+            <button onClick={()=>setViewUnit('week')}
+              className={`px-2.5 py-1 transition-colors ${viewUnit==='week'
+                ?'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold'
+                :'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+              주
+            </button>
+            <button onClick={()=>setViewUnit('month')}
+              className={`px-2.5 py-1 border-l border-slate-200 dark:border-slate-600 transition-colors ${viewUnit==='month'
+                ?'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold'
+                :'text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+              월
+            </button>
+          </div>
           <button onClick={downloadCSV}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
             <Download size={13}/> CSV 다운로드
@@ -386,19 +467,26 @@ export function GanttChart() {
 
       {/* Table */}
       <div className={`flex-1 overflow-auto mx-4 my-3 rounded-xl border border-slate-200 dark:border-slate-700 ${dragging?'select-none':''}`}>
-        <table style={{tableLayout:'fixed',borderCollapse:'collapse',minWidth:ACTION_W+COLS.reduce((s,c)=>s+c.w,0)+weeks.length*WEEK_W}}>
+        {(() => {
+          const colCount = viewUnit==='week' ? weeks.length : months.length
+          const unitW    = viewUnit==='week' ? WEEK_W : MONTH_W
+          const minW     = ACTION_W + COLS.reduce((s,c)=>s+c.w,0) + colCount*unitW
+          const rowSpan  = viewUnit==='week' ? 3 : 2
+          return (
+        <table style={{tableLayout:'fixed',borderCollapse:'separate',borderSpacing:0,minWidth:minW}}>
           <colgroup>
             <col style={{width:ACTION_W}}/>
             {COLS.map(c=><col key={c.key} style={{width:c.w}}/>)}
-            {weeks.map(w=><col key={`${w.year}-${w.week}`} style={{width:WEEK_W}}/>)}
+            {viewUnit==='week'
+              ? weeks.map(w=><col key={`${w.year}-${w.week}`} style={{width:WEEK_W}}/>)
+              : months.map(m=><col key={`${m.year}-${m.month}`} style={{width:MONTH_W}}/>)
+            }
           </colgroup>
 
           <thead>
             <tr style={{height:26}}>
-              <th rowSpan={3} className={`${thBase} sticky z-30`} style={{left:0,width:ACTION_W,top:TOP_YEAR}}>
-                <button
-                  onClick={()=>addDraftRow()}
-                  title="행 추가"
+              <th rowSpan={rowSpan} className={`${thBase} sticky z-30`} style={{left:0,width:ACTION_W,top:TOP_YEAR}}>
+                <button onClick={()=>addDraftRow()} title="행 추가"
                   className="w-7 h-7 flex items-center justify-center rounded-lg mx-auto
                     text-slate-400 hover:text-brand-600 hover:bg-brand-50
                     dark:hover:text-brand-400 dark:hover:bg-brand-900/30 transition-colors">
@@ -406,35 +494,52 @@ export function GanttChart() {
                 </button>
               </th>
               {COLS.map((c,i)=>(
-                <th key={c.key} rowSpan={3} className={`${thBase} sticky z-30 px-2`}
+                <th key={c.key} rowSpan={rowSpan} className={`${thBase} sticky z-30 px-2`}
                   style={{left:colLeft(i),width:c.w,top:TOP_YEAR}}>{c.label}</th>
               ))}
-              {yGroups.map(yg=>(
-                <th key={yg.key} colSpan={yg.count} className={`${thBase} sticky z-20 px-2`}
-                  style={{top:TOP_YEAR}}>{yg.label}</th>
-              ))}
+              {/* Year groups */}
+              {viewUnit==='week'
+                ? yGroups.map(yg=><th key={yg.key} colSpan={yg.count} className={`${thBase} sticky z-20 px-2`} style={{top:TOP_YEAR}}>{yg.label}</th>)
+                : mYearGroups.map(yg=><th key={yg.key} colSpan={yg.count} className={`${thBase} sticky z-20 px-2`} style={{top:TOP_YEAR}}>{yg.label}</th>)
+              }
             </tr>
-            <tr style={{height:24}}>
-              {mGroups.map(mg=>(
-                <th key={mg.key} colSpan={mg.count} className={`${thBase} sticky z-20 px-1`}
-                  style={{top:TOP_MONTH}}>{mg.label}</th>
-              ))}
-            </tr>
+            {/* Month row (week view) */}
+            {viewUnit==='week' && (
+              <tr style={{height:24}}>
+                {mGroups.map(mg=>(
+                  <th key={mg.key} colSpan={mg.count} className={`${thBase} sticky z-20 px-1`}
+                    style={{top:TOP_MONTH}}>{mg.label}</th>
+                ))}
+              </tr>
+            )}
+            {/* Week row (week view) or Month row (month view) */}
             <tr style={{height:22}}>
-              {weeks.map(w=>{
-                const isCur=w.year===nowW.y&&w.week===nowW.w
-                return (
-                  <th key={`${w.year}-${w.week}`} className={`${thBase} sticky z-20`}
-                    style={{top:TOP_WEEK,width:WEEK_W,...(isCur?{background:'#eff6ff',color:'#2563eb'}:{})}}
-                    title={format(w.monday,'MM/dd')}>{w.week}</th>
-                )
-              })}
+              {viewUnit==='week'
+                ? weeks.map(w=>{
+                    const isCur=w.year===nowW.y&&w.week===nowW.w
+                    return (
+                      <th key={`${w.year}-${w.week}`} className={`${thBase} sticky z-20`}
+                        style={{top:TOP_WEEK,width:WEEK_W,...(isCur?{background:'#eff6ff',color:'#2563eb'}:{})}}
+                        title={format(w.monday,'MM/dd')}>W{w.week}</th>
+                    )
+                  })
+                : months.map(m=>{
+                    const isCur=m.year===nowM.y&&m.month===nowM.m
+                    return (
+                      <th key={`${m.year}-${m.month}`} className={`${thBase} sticky z-20`}
+                        style={{top:TOP_MONTH,width:MONTH_W,...(isCur?{background:'#eff6ff',color:'#2563eb'}:{})}}
+                        title={`${m.year}-${String(m.month+1).padStart(2,'0')}`}>
+                        {MONTHS_KO[m.month]}
+                      </th>
+                    )
+                  })
+              }
             </tr>
           </thead>
 
           <tbody>
             {sorted.length===0&&draftRows.length===0&&(
-              <tr><td colSpan={1+COLS.length+weeks.length}
+              <tr><td colSpan={1+COLS.length+colCount}
                 className="text-center py-16 text-slate-400 text-sm border-b border-slate-200 dark:border-slate-700">
                 Activity가 없습니다.
               </td></tr>
@@ -507,76 +612,116 @@ export function GanttChart() {
                     style={{left:colLeft(7),width:COLS[7].w}} sticky bgClass={stickyBg}/>
 
                   {/* Timeline cells */}
-                  {weeks.map(w=>{
-                    const cs=cellState(pa,w) // use preview dates
-                    const hasBar=cs.inRange||cs.isStart||cs.isEnd
-                    const isCurWeek=w.year===nowW.y&&w.week===nowW.w
-                    const [c1,c2]=BAR_GRAD[a.status]??BAR_GRAD.review
-
-                    return (
-                      <td key={`${w.year}-${w.week}`}
-                        className={`border-b border-r border-slate-200 dark:border-slate-700 relative p-0 ${isCurWeek?'bg-brand-50/40 dark:bg-brand-900/10':''}`}
-                        style={{width:WEEK_W,height:36}}>
-                        {isCurWeek&&<div className="absolute inset-y-0 left-1/2 -translate-x-px w-px bg-brand-300 opacity-40"/>}
-
-                        {hasBar&&(
-                          <div
-                            className={`absolute left-0 right-0 mx-px transition-opacity ${isDraggingThis?'opacity-60':''}`}
-                            style={{
-                              top:'20%',bottom:'20%',
-                              borderRadius:cs.isStart&&cs.isEnd?4:cs.isStart?'4px 0 0 4px':cs.isEnd?'0 4px 4px 0':0,
-                              background:`linear-gradient(135deg,${c1},${c2})`,opacity:isDraggingThis?.6:.85,
-                              marginLeft:cs.isStart?2:0,marginRight:cs.isEnd?2:0,
-                            }}>
-                            {/* Left resize handle */}
-                            {cs.isStart&&!cs.isCompletion&&(
-                              <div className="absolute left-0 top-0 bottom-0 w-3 cursor-col-resize z-20 group/hdl"
-                                onMouseDown={e=>handleDragStart(a,'start',e.clientX,e)}>
-                                <div className="absolute left-0.5 top-1/4 bottom-1/4 w-0.5 rounded-full bg-white/60 group-hover/hdl:bg-white transition-colors"/>
+                  {viewUnit==='week'
+                    ? weeks.map(w=>{
+                        const cs=cellState(pa,w)
+                        const hasBar=cs.inRange||cs.isStart||cs.isEnd
+                        const isCurWeek=w.year===nowW.y&&w.week===nowW.w
+                        const [c1,c2]=BAR_GRAD[a.status]??BAR_GRAD.review
+                        return (
+                          <td key={`${w.year}-${w.week}`}
+                            className={`border-b border-r border-slate-200 dark:border-slate-700 relative p-0 ${isCurWeek?'bg-brand-50/40 dark:bg-brand-900/10':''}`}
+                            style={{width:WEEK_W,height:36}}>
+                            {isCurWeek&&<div className="absolute inset-y-0 left-1/2 -translate-x-px w-px bg-brand-300 opacity-40"/>}
+                            {hasBar&&(
+                              <div className={`absolute left-0 right-0 mx-px transition-opacity ${isDraggingThis?'opacity-60':''}`}
+                                style={{top:'20%',bottom:'20%',
+                                  borderRadius:cs.isStart&&cs.isEnd?4:cs.isStart?'4px 0 0 4px':cs.isEnd?'0 4px 4px 0':0,
+                                  background:`linear-gradient(135deg,${c1},${c2})`,opacity:isDraggingThis?.6:.85,
+                                  marginLeft:cs.isStart?2:0,marginRight:cs.isEnd?2:0}}>
+                                {cs.isStart&&!cs.isCompletion&&(
+                                  <div className="absolute left-0 top-0 bottom-0 w-3 cursor-col-resize z-20 group/hdl"
+                                    onMouseDown={e=>handleDragStart(a,'start',e.clientX,e)}>
+                                    <div className="absolute left-0.5 top-1/4 bottom-1/4 w-0.5 rounded-full bg-white/60 group-hover/hdl:bg-white transition-colors"/>
+                                  </div>
+                                )}
+                                {cs.isEnd&&!cs.isCompletion&&(
+                                  <div className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize z-20 group/hdl"
+                                    onMouseDown={e=>handleDragStart(a,'end',e.clientX,e)}>
+                                    <div className="absolute right-0.5 top-1/4 bottom-1/4 w-0.5 rounded-full bg-white/60 group-hover/hdl:bg-white transition-colors"/>
+                                  </div>
+                                )}
+                                {!cs.isCompletion&&(
+                                  <div className="absolute cursor-grab active:cursor-grabbing z-10"
+                                    style={{left:cs.isStart?12:0,right:cs.isEnd?12:0,top:0,bottom:0}}
+                                    onMouseDown={e=>handleDragStart(a,'move',e.clientX,e)}/>
+                                )}
                               </div>
                             )}
-                            {/* Right resize handle */}
-                            {cs.isEnd&&!cs.isCompletion&&(
-                              <div className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize z-20 group/hdl"
-                                onMouseDown={e=>handleDragStart(a,'end',e.clientX,e)}>
-                                <div className="absolute right-0.5 top-1/4 bottom-1/4 w-0.5 rounded-full bg-white/60 group-hover/hdl:bg-white transition-colors"/>
+                            {cs.isCompletion&&(
+                              <div className="absolute inset-0 flex items-center justify-center z-10">
+                                <div className="w-4 h-4 rounded-full bg-violet-500 flex items-center justify-center shadow-sm">
+                                  <span className="text-white text-[8px] font-bold">✓</span>
+                                </div>
                               </div>
                             )}
-                            {/* Move handle (middle area) */}
-                            {!cs.isCompletion&&(
-                              <div className={`absolute cursor-grab active:cursor-grabbing z-10`}
-                                style={{left:cs.isStart?12:0,right:cs.isEnd?12:0,top:0,bottom:0}}
-                                onMouseDown={e=>handleDragStart(a,'move',e.clientX,e)}/>
+                            {!cs.isCompletion&&cs.isStart&&!hasBar&&(
+                              <div className="absolute top-1/2 -translate-y-1/2 left-1 z-10 w-1.5 h-1.5 rounded-full bg-slate-400"/>
                             )}
-                          </div>
-                        )}
-
-                        {/* Completion marker */}
-                        {cs.isCompletion&&(
-                          <div className="absolute inset-0 flex items-center justify-center z-10">
-                            <div className="w-4 h-4 rounded-full bg-violet-500 flex items-center justify-center shadow-sm">
-                              <span className="text-white text-[8px] font-bold">✓</span>
-                            </div>
-                          </div>
-                        )}
-                        {!cs.isCompletion&&cs.isStart&&!hasBar&&(
-                          <div className="absolute top-1/2 -translate-y-1/2 left-1 z-10 w-1.5 h-1.5 rounded-full bg-slate-400"/>
-                        )}
-                      </td>
-                    )
-                  })}
+                          </td>
+                        )
+                      })
+                    : months.map(m=>{
+                        const cs=monthCellState(pa,m)
+                        const hasBar=cs.inRange||cs.isStart||cs.isEnd
+                        const isCurMonth=m.year===nowM.y&&m.month===nowM.m
+                        const [c1,c2]=BAR_GRAD[a.status]??BAR_GRAD.review
+                        return (
+                          <td key={`${m.year}-${m.month}`}
+                            className={`border-b border-r border-slate-200 dark:border-slate-700 relative p-0 ${isCurMonth?'bg-brand-50/40 dark:bg-brand-900/10':''}`}
+                            style={{width:MONTH_W,height:36}}>
+                            {isCurMonth&&<div className="absolute inset-y-0 left-1/2 -translate-x-px w-px bg-brand-300 opacity-40"/>}
+                            {hasBar&&(
+                              <div className={`absolute left-0 right-0 mx-px transition-opacity ${isDraggingThis?'opacity-60':''}`}
+                                style={{top:'20%',bottom:'20%',
+                                  borderRadius:cs.isStart&&cs.isEnd?4:cs.isStart?'4px 0 0 4px':cs.isEnd?'0 4px 4px 0':0,
+                                  background:`linear-gradient(135deg,${c1},${c2})`,opacity:isDraggingThis?.6:.85,
+                                  marginLeft:cs.isStart?2:0,marginRight:cs.isEnd?2:0}}>
+                                {cs.isStart&&!cs.isCompletion&&(
+                                  <div className="absolute left-0 top-0 bottom-0 w-3 cursor-col-resize z-20 group/hdl"
+                                    onMouseDown={e=>handleDragStart(a,'start',e.clientX,e)}>
+                                    <div className="absolute left-0.5 top-1/4 bottom-1/4 w-0.5 rounded-full bg-white/60 group-hover/hdl:bg-white transition-colors"/>
+                                  </div>
+                                )}
+                                {cs.isEnd&&!cs.isCompletion&&(
+                                  <div className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize z-20 group/hdl"
+                                    onMouseDown={e=>handleDragStart(a,'end',e.clientX,e)}>
+                                    <div className="absolute right-0.5 top-1/4 bottom-1/4 w-0.5 rounded-full bg-white/60 group-hover/hdl:bg-white transition-colors"/>
+                                  </div>
+                                )}
+                                {!cs.isCompletion&&(
+                                  <div className="absolute cursor-grab active:cursor-grabbing z-10"
+                                    style={{left:cs.isStart?12:0,right:cs.isEnd?12:0,top:0,bottom:0}}
+                                    onMouseDown={e=>handleDragStart(a,'move',e.clientX,e)}/>
+                                )}
+                              </div>
+                            )}
+                            {cs.isCompletion&&(
+                              <div className="absolute inset-0 flex items-center justify-center z-10">
+                                <div className="w-4 h-4 rounded-full bg-violet-500 flex items-center justify-center shadow-sm">
+                                  <span className="text-white text-[8px] font-bold">✓</span>
+                                </div>
+                              </div>
+                            )}
+                          </td>
+                        )
+                      })
+                  }
                 </tr>
               )
             })}
 
             {/* Draft rows */}
             {draftRows.map((d,di)=>(
-              <DraftActivityRow key={d._id} draft={d} techItems={techItems} weeks={weeks}
+              <DraftActivityRow key={d._id} draft={d} techItems={techItems}
+                weeks={weeks} months={months} viewUnit={viewUnit}
                 onUpdate={u=>updateDraft(d._id,u)} onSave={()=>saveDraft(d)} onCancel={()=>removeDraft(d._id)}
                 rowIndex={sorted.length+di}/>
             ))}
           </tbody>
         </table>
+          )
+        })()}
       </div>
 
       {actModal.open&&selectedProjectId&&(
@@ -598,8 +743,8 @@ function ActionBtn({children,onClick,title,color}:{children:React.ReactNode;onCl
 }
 
 // ── DraftActivityRow ──────────────────────────────────────────────────────────
-function DraftActivityRow({draft,techItems,weeks,onUpdate,onSave,onCancel,rowIndex}:{
-  draft:DraftRow;techItems:TechItem[];weeks:WeekInfo[];
+function DraftActivityRow({draft,techItems,weeks,months,viewUnit,onUpdate,onSave,onCancel,rowIndex}:{
+  draft:DraftRow;techItems:TechItem[];weeks:WeekInfo[];months:MonthInfo[];viewUnit:'week'|'month';
   onUpdate:(u:Partial<DraftRow>)=>void;onSave:()=>void;onCancel:()=>void;rowIndex:number;
 }) {
   const rowBg=rowIndex%2===0?'':'bg-slate-50/60 dark:bg-slate-800/30'
@@ -647,9 +792,14 @@ function DraftActivityRow({draft,techItems,weeks,onUpdate,onSave,onCancel,rowInd
       <td className={td} style={{left:colLeft(7),width:COLS[7].w}}>
         <input className={inp} placeholder="메모" value={draft.notes} onKeyDown={kd} onChange={e=>upd('notes',e.target.value)}/>
       </td>
-      {weeks.map(w=>(
-        <td key={`${w.year}-${w.week}`} className="border-b border-r border-brand-100 dark:border-brand-900/30" style={{width:WEEK_W}}/>
-      ))}
+      {viewUnit==='week'
+        ? weeks.map(w=>(
+            <td key={`${w.year}-${w.week}`} className="border-b border-r border-brand-100 dark:border-brand-900/30" style={{width:WEEK_W}}/>
+          ))
+        : months.map(m=>(
+            <td key={`${m.year}-${m.month}`} className="border-b border-r border-brand-100 dark:border-brand-900/30" style={{width:MONTH_W}}/>
+          ))
+      }
     </tr>
   )
 }

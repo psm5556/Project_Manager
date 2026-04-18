@@ -139,7 +139,7 @@ function ProjectNode({
     flex items-center gap-1.5 px-2 py-[5px] rounded-lg cursor-pointer group
     text-[13px] select-none transition-colors duration-100
   `
-  const activeRow  = 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300 font-medium'
+  const activeRow  = 'bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300 font-medium'
   const normalRow  = 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
 
   return (
