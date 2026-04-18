@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: #f8fafc;
+  }
+
+  .dark body {
+    background: #0a0f1e;
+  }
+}
+
+/* ── Scrollbars ─────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.dark ::-webkit-scrollbar-thumb { background: #334155; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+/* ── Gantt cell editable inputs ─────────────────────────────── */
+.gcell-input {
+  width: 100%;
+  height: 100%;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 11px;
+  color: inherit;
+  font-family: inherit;
+}
+.gcell-input:focus {
+  background: #fff;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1.5px #3b82f6;
+  color: #0f172a;
+}
+.dark .gcell-input:focus {
+  background: #1e293b;
+  color: #f1f5f9;
+}
+
+/* ── Status chips ────────────────────────────────────────────── */
+.chip-review    { @apply bg-amber-50  text-amber-700  ring-1 ring-amber-200;  }
+.chip-progress  { @apply bg-blue-50   text-blue-700   ring-1 ring-blue-200;   }
+.chip-complete  { @apply bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200; }
+.dark .chip-review   { @apply bg-amber-900/30  text-amber-300  ring-amber-700; }
+.dark .chip-progress { @apply bg-blue-900/30   text-blue-300   ring-blue-700;  }
+.dark .chip-complete { @apply bg-emerald-900/30 text-emerald-300 ring-emerald-700; }
