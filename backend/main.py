@@ -1,9 +1,12 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List
 import json
+import os
 
 from database import SessionLocal, engine, Base
 import models
@@ -234,3 +237,20 @@ async def delete_activity(aid: int, db: Session = Depends(get_db)):
         "data": {"id": aid, "tech_item_id": tech_item_id, "project_id": project_id},
     })
     return {"ok": True}
+
+
+# ── Static frontend ───────────────────────────────────────────────────────────
+_BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+_STATIC_DIR = os.path.join(_BASE_DIR, "static")
+
+if os.path.isdir(_STATIC_DIR):
+    _assets = os.path.join(_STATIC_DIR, "assets")
+    if os.path.isdir(_assets):
+        app.mount("/assets", StaticFiles(directory=_assets), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa(full_path: str):
+        index = os.path.join(_STATIC_DIR, "index.html")
+        if os.path.exists(index):
+            return FileResponse(index)
+        return JSONResponse({"detail": "Frontend not built."}, status_code=503)

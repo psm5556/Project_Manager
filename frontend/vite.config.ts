@@ -6,8 +6,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/ws': { target: 'ws://localhost:8000', ws: true },
+      '/api': 'http://localhost:7010',
+      '/ws': { target: 'ws://localhost:7010', ws: true },
     },
+  },
+  build: {
+    outDir: '../backend/static',
+    emptyOutDir: true,
   },
 })
