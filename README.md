@@ -36,7 +36,8 @@ Project_Manager/
 │   │   └── types/           # TypeScript 타입 정의
 │   ├── package.json
 │   └── vite.config.ts       # dev: /api → localhost:7010 프록시 / build: backend/static 출력
-├── start_app.bat            # App Manager 실행 스크립트 (빌드 + 백엔드 시작)
+├── start_app.py             # App Manager 실행 스크립트 (Windows/Linux 공용, 빌드 + 백엔드 시작)
+├── start_app.bat            # Windows 직접 실행용 (더블클릭)
 ├── start_backend.bat        # 개발용 백엔드 단독 실행
 ├── start_frontend.bat       # 개발용 프론트엔드 단독 실행 (Vite dev)
 └── README.md
@@ -54,7 +55,7 @@ Project_Manager/
 | 앱 타입 | `FastAPI + React` |
 | 폴더 경로 | `C:\Users\psm55\Git\Project_Manager` |
 | 포트 | `7010` |
-| 시작 명령 | `start_app.bat` |
+| 시작 명령 | `python start_app.py` |
 | Conda 환경 | `base` |
 
 **실행 시 동작:**
