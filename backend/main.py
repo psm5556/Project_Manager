@@ -30,17 +30,31 @@ app.add_middleware(
 
 # ─── DB migration (add columns to existing tables) ────────────────────────────
 
+ADMIN_KNOX_ID = "sm556.park"
+
+
 @app.on_event("startup")
 def run_migrations():
     with engine.connect() as conn:
         for stmt in [
             "ALTER TABLE projects ADD COLUMN created_by INTEGER REFERENCES users(id)",
+            "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(text(stmt))
                 conn.commit()
             except Exception:
                 pass  # Column already exists
+
+    # Ensure default admin account exists
+    db = SessionLocal()
+    try:
+        admin = db.query(models.User).filter(models.User.knox_id == ADMIN_KNOX_ID).first()
+        if admin and not admin.is_admin:
+            admin.is_admin = True
+            db.commit()
+    finally:
+        db.close()
 
 
 # ─── WebSocket ────────────────────────────────────────────────────────────────
@@ -85,6 +99,20 @@ def get_db():
 security = HTTPBearer(auto_error=False)
 
 
+def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db),
+) -> Optional[models.User]:
+    if not credentials:
+        return None
+    try:
+        payload = auth_utils.decode_token(credentials.credentials)
+        user_id = int(payload["sub"])
+        return db.query(models.User).filter(models.User.id == user_id).first()
+    except Exception:
+        return None
+
+
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
@@ -118,6 +146,12 @@ def get_user_role(project_id: int, user_id: int, db: Session) -> Optional[str]:
         models.ProjectMember.user_id == user_id,
     ).first()
     return member.role if member else None
+
+
+def require_admin(current_user: models.User = Depends(get_current_user)) -> models.User:
+    if not current_user.is_admin:
+        raise HTTPException(403, "관리자 권한이 필요합니다")
+    return current_user
 
 
 def require_member(project_id: int, user: models.User, db: Session) -> str:
@@ -547,6 +581,74 @@ async def delete_activity(
         "type": "activity_deleted",
         "data": {"id": aid, "tech_item_id": tech_item_id, "project_id": project_id},
     })
+    return {"ok": True}
+
+
+# ─── Admin ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/admin/users", response_model=List[schemas.UserResponse])
+def admin_list_users(
+    admin: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return db.query(models.User).order_by(models.User.created_at).all()
+
+
+@app.patch("/api/admin/users/{uid}", response_model=schemas.UserResponse)
+def admin_update_user(
+    uid: int,
+    body: schemas.AdminUserUpdate,
+    admin: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    user = db.query(models.User).filter(models.User.id == uid).first()
+    if not user:
+        raise HTTPException(404, "사용자를 찾을 수 없습니다")
+    if body.name is not None:
+        user.name = body.name.strip()
+    if body.is_admin is not None:
+        # Prevent removing own admin
+        if uid == admin.id and not body.is_admin:
+            raise HTTPException(400, "자신의 관리자 권한은 제거할 수 없습니다")
+        user.is_admin = body.is_admin
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.post("/api/admin/users/{uid}/reset-pin", response_model=schemas.UserResponse)
+def admin_reset_pin(
+    uid: int,
+    body: schemas.AdminResetPin,
+    admin: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if len(body.new_pin) != 6 or not body.new_pin.isdigit():
+        raise HTTPException(400, "PIN은 6자리 숫자여야 합니다")
+    user = db.query(models.User).filter(models.User.id == uid).first()
+    if not user:
+        raise HTTPException(404, "사용자를 찾을 수 없습니다")
+    pin_hash, pin_salt = auth_utils.hash_pin(body.new_pin)
+    user.pin_hash = pin_hash
+    user.pin_salt = pin_salt
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+@app.delete("/api/admin/users/{uid}")
+def admin_delete_user(
+    uid: int,
+    admin: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if uid == admin.id:
+        raise HTTPException(400, "자신의 계정은 삭제할 수 없습니다")
+    user = db.query(models.User).filter(models.User.id == uid).first()
+    if not user:
+        raise HTTPException(404, "사용자를 찾을 수 없습니다")
+    db.delete(user)
+    db.commit()
     return {"ok": True}
 
 

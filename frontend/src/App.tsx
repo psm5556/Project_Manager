@@ -9,15 +9,17 @@ import { GanttChart } from './components/GanttChart'
 import { KanbanBoard } from './components/KanbanBoard'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
+import { AdminPage } from './pages/AdminPage'
 
 function Layout() {
   const { darkMode, viewMode } = useApp()
+  const [showAdmin, setShowAdmin] = useState(false)
   useWebSocket()
 
   return (
     <div className={darkMode ? 'dark' : ''} style={{ height: '100%' }}>
       <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-        <Navbar />
+        <Navbar onOpenAdmin={() => setShowAdmin(true)} />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />
           <main className="flex-1 flex flex-col overflow-hidden">
@@ -25,6 +27,7 @@ function Layout() {
           </main>
         </div>
       </div>
+      {showAdmin && <AdminPage onClose={() => setShowAdmin(false)} />}
     </div>
   )
 }

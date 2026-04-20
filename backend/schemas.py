@@ -20,9 +20,19 @@ class UserResponse(BaseModel):
     id: int
     name: str
     knox_id: str
+    is_admin: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AdminUserUpdate(BaseModel):
+    name: Optional[str] = None
+    is_admin: Optional[bool] = None
+
+
+class AdminResetPin(BaseModel):
+    new_pin: str
 
 
 class TokenResponse(BaseModel):

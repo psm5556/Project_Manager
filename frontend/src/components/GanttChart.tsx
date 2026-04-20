@@ -519,7 +519,7 @@ export function GanttChart() {
                     const isCur=w.year===nowW.y&&w.week===nowW.w
                     return (
                       <th key={`${w.year}-${w.week}`} className={`${thBase} sticky z-20`}
-                        style={{top:TOP_WEEK,width:WEEK_W,...(isCur?{background:'#eff6ff',color:'#2563eb'}:{})}}
+                        style={{top:TOP_WEEK,width:WEEK_W,...(isCur?{background:'#93c5fd',color:'#1e3a8a',fontWeight:700}:{})}}
                         title={format(w.monday,'MM/dd')}>W{w.week}</th>
                     )
                   })
@@ -527,7 +527,7 @@ export function GanttChart() {
                     const isCur=m.year===nowM.y&&m.month===nowM.m
                     return (
                       <th key={`${m.year}-${m.month}`} className={`${thBase} sticky z-20`}
-                        style={{top:TOP_MONTH,width:MONTH_W,...(isCur?{background:'#eff6ff',color:'#2563eb'}:{})}}
+                        style={{top:TOP_MONTH,width:MONTH_W,...(isCur?{background:'#93c5fd',color:'#1e3a8a',fontWeight:700}:{})}}
                         title={`${m.year}-${String(m.month+1).padStart(2,'0')}`}>
                         {MONTHS_KO[m.month]}
                       </th>
@@ -620,9 +620,9 @@ export function GanttChart() {
                         const [c1,c2]=BAR_GRAD[a.status]??BAR_GRAD.review
                         return (
                           <td key={`${w.year}-${w.week}`}
-                            className={`border-b border-r border-slate-200 dark:border-slate-700 relative p-0 ${isCurWeek?'bg-brand-50/40 dark:bg-brand-900/10':''}`}
+                            className={`border-b border-r border-slate-200 dark:border-slate-700 relative p-0 ${isCurWeek?'bg-blue-200/70 dark:bg-brand-900/10':''}`}
                             style={{width:WEEK_W,height:36}}>
-                            {isCurWeek&&<div className="absolute inset-y-0 left-1/2 -translate-x-px w-px bg-brand-300 opacity-40"/>}
+                            {isCurWeek&&<div className="absolute inset-y-0 left-1/2 -translate-x-px w-[2px] bg-blue-500 opacity-70"/>}
                             {hasBar&&(
                               <div className={`absolute left-0 right-0 mx-px transition-opacity ${isDraggingThis?'opacity-60':''}`}
                                 style={{top:'20%',bottom:'20%',
@@ -668,9 +668,9 @@ export function GanttChart() {
                         const [c1,c2]=BAR_GRAD[a.status]??BAR_GRAD.review
                         return (
                           <td key={`${m.year}-${m.month}`}
-                            className={`border-b border-r border-slate-200 dark:border-slate-700 relative p-0 ${isCurMonth?'bg-brand-50/40 dark:bg-brand-900/10':''}`}
+                            className={`border-b border-r border-slate-200 dark:border-slate-700 relative p-0 ${isCurMonth?'bg-blue-200/70 dark:bg-brand-900/10':''}`}
                             style={{width:MONTH_W,height:36}}>
-                            {isCurMonth&&<div className="absolute inset-y-0 left-1/2 -translate-x-px w-px bg-brand-300 opacity-40"/>}
+                            {isCurMonth&&<div className="absolute inset-y-0 left-1/2 -translate-x-px w-[2px] bg-blue-500 opacity-70"/>}
                             {hasBar&&(
                               <div className={`absolute left-0 right-0 mx-px transition-opacity ${isDraggingThis?'opacity-60':''}`}
                                 style={{top:'20%',bottom:'20%',

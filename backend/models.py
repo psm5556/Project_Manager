@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, Text, ForeignKey, DateTime, func
+from sqlalchemy import Column, Integer, String, Date, Text, ForeignKey, DateTime, Boolean, func
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -11,6 +11,7 @@ class User(Base):
     knox_id = Column(String(100), unique=True, nullable=False, index=True)
     pin_hash = Column(String(128), nullable=False)
     pin_salt = Column(String(32), nullable=False)
+    is_admin = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
     project_memberships = relationship("ProjectMember", back_populates="user", cascade="all, delete-orphan")

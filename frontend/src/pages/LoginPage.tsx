@@ -98,6 +98,17 @@ export function LoginPage({ onSwitch }: Props) {
             계정 등록
           </button>
         </p>
+
+        <p className="text-center text-xs text-slate-400 dark:text-slate-500 mt-3 leading-relaxed">
+          PIN 번호를 모를 경우{' '}
+          <a
+            href="mailto:sm556.park@samssung.com"
+            className="text-brand-500 dark:text-brand-400 hover:underline"
+          >
+            sm556.park@samssung.com
+          </a>
+          으로 문의주세요.
+        </p>
       </div>
     </div>
   )

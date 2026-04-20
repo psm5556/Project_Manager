@@ -38,6 +38,20 @@ export const getMe = () =>
 export const searchUsers = (q: string) =>
   api.get<User[]>('/users/search', { params: { q } }).then(r => r.data)
 
+// ─── Admin ────────────────────────────────────────────────────────────────────
+
+export const adminListUsers = () =>
+  api.get<User[]>('/admin/users').then(r => r.data)
+
+export const adminUpdateUser = (id: number, data: { name?: string; is_admin?: boolean }) =>
+  api.patch<User>(`/admin/users/${id}`, data).then(r => r.data)
+
+export const adminResetPin = (id: number, new_pin: string) =>
+  api.post<User>(`/admin/users/${id}/reset-pin`, { new_pin }).then(r => r.data)
+
+export const adminDeleteUser = (id: number) =>
+  api.delete(`/admin/users/${id}`)
+
 // ─── Projects ─────────────────────────────────────────────────────────────────
 
 export const getProjects = () => api.get<Project[]>('/projects').then(r => r.data)

@@ -1,10 +1,14 @@
-import { Sun, Moon, LogOut, User } from 'lucide-react'
+import { Sun, Moon, LogOut, User, Crown } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useApp } from '../contexts/AppContext'
 import { useAuth } from '../contexts/AuthContext'
 import { getProjectActivities } from '../api'
 
-export function Navbar() {
+interface NavbarProps {
+  onOpenAdmin?: () => void
+}
+
+export function Navbar({ onOpenAdmin }: NavbarProps) {
   const { selectedProjectId, viewMode, setViewMode, darkMode, toggleDarkMode } = useApp()
   const { user, logout } = useAuth()
 
@@ -79,6 +83,21 @@ export function Navbar() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Admin button */}
+        {user?.is_admin && (
+          <button
+            onClick={onOpenAdmin}
+            title="전체 관리자"
+            className="flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[12px] font-medium
+              bg-amber-50 hover:bg-amber-100 text-amber-700
+              dark:bg-amber-900/20 dark:hover:bg-amber-900/40 dark:text-amber-400
+              border border-amber-200 dark:border-amber-800 transition-colors"
+          >
+            <Crown size={13} />
+            관리자
+          </button>
         )}
 
         {/* User info */}
