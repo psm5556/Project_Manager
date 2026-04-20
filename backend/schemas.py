@@ -3,6 +3,35 @@ from datetime import date, datetime
 from typing import Optional
 
 
+# ─── Auth ─────────────────────────────────────────────────────────────────────
+
+class UserRegister(BaseModel):
+    name: str
+    knox_id: str
+    pin: str  # 6-digit PIN
+
+
+class UserLogin(BaseModel):
+    knox_id: str
+    pin: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    name: str
+    knox_id: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TokenResponse(BaseModel):
+    token: str
+    user: UserResponse
+
+
+# ─── Projects ─────────────────────────────────────────────────────────────────
+
 class ProjectCreate(BaseModel):
     name: str
     description: Optional[str] = ""
@@ -19,11 +48,15 @@ class ProjectResponse(BaseModel):
     name: str
     description: str
     version: int
+    created_by: Optional[int]
+    user_role: Optional[str]  # "master", "member", or None (legacy)
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
 
+
+# ─── Tech Items ───────────────────────────────────────────────────────────────
 
 class TechItemCreate(BaseModel):
     project_id: int
@@ -51,6 +84,8 @@ class TechItemResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+
+# ─── Activities ───────────────────────────────────────────────────────────────
 
 class ActivityCreate(BaseModel):
     tech_item_id: int
@@ -98,3 +133,37 @@ class ActivityResponse(BaseModel):
     @classmethod
     def coerce_none_to_empty(cls, v: object) -> str:
         return v if v is not None else ""
+
+
+# ─── Members ──────────────────────────────────────────────────────────────────
+
+class MemberResponse(BaseModel):
+    id: int
+    user_id: int
+    name: str
+    knox_id: str
+    role: str  # master, member
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AddMemberRequest(BaseModel):
+    knox_id: str
+    role: Optional[str] = "member"  # master, member
+
+
+class UpdateMemberRoleRequest(BaseModel):
+    role: str  # master, member
+
+
+# ─── Backups ──────────────────────────────────────────────────────────────────
+
+class BackupResponse(BaseModel):
+    id: int
+    project_id: int
+    name: str
+    created_by_name: Optional[str]
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

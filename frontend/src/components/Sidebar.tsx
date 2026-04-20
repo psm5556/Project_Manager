@@ -2,21 +2,25 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronRight, ChevronDown, Plus, Pencil, Trash2,
-  FolderOpen, Folder, Layers,
+  FolderOpen, Folder, Layers, Users, Archive,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useApp } from '../contexts/AppContext'
 import { getProjects, getTechItems, deleteProject, deleteTechItem } from '../api'
 import { ProjectModal } from './modals/ProjectModal'
 import { TechItemModal } from './modals/TechItemModal'
+import { MembersModal } from './modals/MembersModal'
+import { BackupModal } from './modals/BackupModal'
 import type { Project, TechItem } from '../types'
 
 export function Sidebar() {
   const { selectedProjectId, setSelectedProjectId, selectedTechItemId, setSelectedTechItemId } = useApp()
   const qc = useQueryClient()
-  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const [expanded, setExpanded]       = useState<Set<number>>(new Set())
   const [projectModal, setProjectModal] = useState<{ open: boolean; project?: Project }>({ open: false })
-  const [tiModal, setTiModal]     = useState<{ open: boolean; projectId?: number; item?: TechItem }>({ open: false })
+  const [tiModal, setTiModal]           = useState<{ open: boolean; projectId?: number; item?: TechItem }>({ open: false })
+  const [membersModal, setMembersModal] = useState<{ open: boolean; project?: Project }>({ open: false })
+  const [backupModal, setBackupModal]   = useState<{ open: boolean; project?: Project }>({ open: false })
 
   const { data: projects = [] } = useQuery({ queryKey: ['projects'], queryFn: getProjects })
 
@@ -73,6 +77,8 @@ export function Sidebar() {
             onAddTI={e => { e.stopPropagation(); setTiModal({ open: true, projectId: p.id }) }}
             onSelectTI={id => { setSelectedProjectId(p.id); setSelectedTechItemId(id) }}
             onEditTI={item => setTiModal({ open: true, projectId: p.id, item })}
+            onMembers={e => { e.stopPropagation(); setMembersModal({ open: true, project: p }) }}
+            onBackup={e => { e.stopPropagation(); setBackupModal({ open: true, project: p }) }}
           />
         ))}
         {projects.length === 0 && (
@@ -94,6 +100,12 @@ export function Sidebar() {
       {tiModal.open && tiModal.projectId && (
         <TechItemModal projectId={tiModal.projectId} item={tiModal.item} onClose={() => setTiModal({ open: false })} />
       )}
+      {membersModal.open && membersModal.project && (
+        <MembersModal project={membersModal.project} onClose={() => setMembersModal({ open: false })} />
+      )}
+      {backupModal.open && backupModal.project && (
+        <BackupModal project={backupModal.project} onClose={() => setBackupModal({ open: false })} />
+      )}
     </aside>
   )
 }
@@ -111,13 +123,17 @@ interface PNodeProps {
   onAddTI: (e: React.MouseEvent) => void
   onSelectTI: (id: number) => void
   onEditTI: (item: TechItem) => void
+  onMembers: (e: React.MouseEvent) => void
+  onBackup: (e: React.MouseEvent) => void
 }
 
 function ProjectNode({
   project, isExpanded, isSelected, selectedTechItemId,
   onToggle, onSelect, onEdit, onDelete, onAddTI, onSelectTI, onEditTI,
+  onMembers, onBackup,
 }: PNodeProps) {
   const qc = useQueryClient()
+  const isMaster = project.user_role === 'master'
 
   const { data: techItems = [] } = useQuery({
     queryKey: ['tech_items', project.id],
@@ -139,8 +155,8 @@ function ProjectNode({
     flex items-center gap-1.5 px-2 py-[5px] rounded-lg cursor-pointer group
     text-[13px] select-none transition-colors duration-100
   `
-  const activeRow  = 'bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300 font-medium'
-  const normalRow  = 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+  const activeRow = 'bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300 font-medium'
+  const normalRow = 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
 
   return (
     <div>
@@ -159,9 +175,11 @@ function ProjectNode({
 
         {/* Action buttons */}
         <span className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
-          <ActionBtn title="편집" onClick={onEdit}><Pencil size={11} /></ActionBtn>
-          <ActionBtn title="Tech Item 추가" onClick={onAddTI}><Plus size={11} /></ActionBtn>
-          <ActionBtn title="삭제" onClick={onDelete} danger><Trash2 size={11} /></ActionBtn>
+          <ActionBtn title="멤버 관리" onClick={onMembers}><Users size={11} /></ActionBtn>
+          <ActionBtn title="백업/복구" onClick={onBackup}><Archive size={11} /></ActionBtn>
+          {isMaster && <ActionBtn title="편집" onClick={onEdit}><Pencil size={11} /></ActionBtn>}
+          {isMaster && <ActionBtn title="Tech Item 추가" onClick={onAddTI}><Plus size={11} /></ActionBtn>}
+          {isMaster && <ActionBtn title="삭제" onClick={onDelete} danger><Trash2 size={11} /></ActionBtn>}
         </span>
       </div>
 

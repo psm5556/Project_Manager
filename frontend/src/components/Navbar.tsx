@@ -1,10 +1,12 @@
-import { Sun, Moon } from 'lucide-react'
+import { Sun, Moon, LogOut, User } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useApp } from '../contexts/AppContext'
+import { useAuth } from '../contexts/AuthContext'
 import { getProjectActivities } from '../api'
 
 export function Navbar() {
   const { selectedProjectId, viewMode, setViewMode, darkMode, toggleDarkMode } = useApp()
+  const { user, logout } = useAuth()
 
   const { data: activities = [] } = useQuery({
     queryKey: ['activities', 'project', selectedProjectId],
@@ -12,11 +14,11 @@ export function Navbar() {
     enabled: !!selectedProjectId,
   })
 
-  const total     = activities.length
-  const review    = activities.filter(a => a.status === 'review').length
-  const inProgress= activities.filter(a => a.status === 'in_progress').length
-  const complete  = activities.filter(a => a.status === 'complete').length
-  const rate      = total > 0 ? Math.round((complete / total) * 100) : 0
+  const total      = activities.length
+  const review     = activities.filter(a => a.status === 'review').length
+  const inProgress = activities.filter(a => a.status === 'in_progress').length
+  const complete   = activities.filter(a => a.status === 'complete').length
+  const rate       = total > 0 ? Math.round((complete / total) * 100) : 0
 
   return (
     <header className="h-[52px] flex-shrink-0 flex items-center px-5 gap-4
@@ -54,8 +56,8 @@ export function Navbar() {
         </div>
       </div>
 
-      {/* ── Right: stats + dark mode ─────────────────────── */}
-      <div className="flex items-center gap-4 flex-shrink-0">
+      {/* ── Right: stats + user + dark mode ─────────────── */}
+      <div className="flex items-center gap-3 flex-shrink-0">
         {selectedProjectId && (
           <div className="flex items-center gap-3">
             <StatBadge label="전체" value={total} color="text-slate-700 dark:text-slate-300" bg="bg-slate-100 dark:bg-slate-800" />
@@ -76,6 +78,28 @@ export function Navbar() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* User info */}
+        {user && (
+          <div className="flex items-center gap-2 pl-3 border-l border-slate-200 dark:border-slate-700">
+            <div className="w-7 h-7 rounded-full bg-brand-100 dark:bg-brand-900/40 flex items-center justify-center">
+              <User size={14} className="text-brand-600 dark:text-brand-400" />
+            </div>
+            <div className="hidden md:flex flex-col leading-none">
+              <span className="text-[12px] font-semibold text-slate-800 dark:text-slate-200">{user.name}</span>
+              <span className="text-[10px] text-slate-400 dark:text-slate-500">{user.knox_id}</span>
+            </div>
+            <button
+              onClick={logout}
+              title="로그아웃"
+              className="w-7 h-7 flex items-center justify-center rounded-lg
+                text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20
+                transition-colors ml-1"
+            >
+              <LogOut size={14} />
+            </button>
           </div>
         )}
 

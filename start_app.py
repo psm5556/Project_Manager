@@ -11,6 +11,17 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(ROOT, "frontend")
 BACKEND_DIR  = os.path.join(ROOT, "backend")
 
+# PyJWT 설치 여부만 확인 (Anaconda 환경에서 전체 재설치 시 pydantic-core 빌드 오류 방지)
+try:
+    import jwt  # noqa: F401
+except ImportError:
+    print("[Project Manager] Installing PyJWT...")
+    subprocess.run(
+        f"{sys.executable} -m pip install PyJWT==2.8.0 -q",
+        shell=True,
+        check=True,
+    )
+
 print("[Project Manager] Building frontend...")
 build = subprocess.run("npm run build", cwd=FRONTEND_DIR, shell=True)
 if build.returncode != 0:

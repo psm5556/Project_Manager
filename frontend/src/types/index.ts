@@ -1,8 +1,17 @@
+export interface User {
+  id: number
+  name: string
+  knox_id: string
+  created_at: string
+}
+
 export interface Project {
   id: number
   name: string
   description: string
   version: number
+  created_by: number | null
+  user_role: 'master' | 'member' | null
   created_at: string
   updated_at: string
 }
@@ -34,6 +43,23 @@ export interface Activity {
   version: number
   created_at: string
   updated_at: string
+}
+
+export interface Member {
+  id: number
+  user_id: number
+  name: string
+  knox_id: string
+  role: 'master' | 'member'
+  created_at: string
+}
+
+export interface Backup {
+  id: number
+  project_id: number
+  name: string
+  created_by_name: string | null
+  created_at: string
 }
 
 export type ViewMode = 'gantt' | 'kanban'
