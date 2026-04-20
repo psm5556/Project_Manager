@@ -5,15 +5,15 @@ import {
   parseISO, isWithinInterval, addDays, format, getMonth, getYear,
   startOfMonth, endOfMonth, addMonths,
 } from 'date-fns'
-import { Trash2, Plus, Pencil, Check, X as XIcon, Download } from 'lucide-react'
+import { Trash2, Plus, Pencil, Check, X as XIcon, Download, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useApp } from '../contexts/AppContext'
 import {
   getProjectActivities, getTechItemActivities, getTechItems,
-  createActivity, updateActivity, deleteActivity,
+  createActivity, updateActivity, deleteActivity, getMembers,
 } from '../api'
 import { ActivityModal } from './modals/ActivityModal'
-import type { Activity, TechItem } from '../types'
+import type { Activity, TechItem, Member } from '../types'
 
 // ── Column definitions ────────────────────────────────────────────────────────
 const COLS = [
@@ -248,6 +248,17 @@ export function GanttChart() {
     queryFn:  ()=>getTechItems(selectedProjectId!),
     enabled:  !!selectedProjectId,
   })
+
+  const { data: members = [] } = useQuery({
+    queryKey: ['members', selectedProjectId],
+    queryFn:  ()=>getMembers(selectedProjectId!),
+    enabled:  !!selectedProjectId,
+  })
+
+  const todayStr = useMemo(()=>format(new Date(),'yyyy-MM-dd'),[])
+  const isDelayed = useCallback((a: Activity)=>
+    !!a.end_date && a.end_date < todayStr && a.status !== 'complete'
+  ,[todayStr])
 
   const tiMap      = useMemo(()=>Object.fromEntries(techItems.map(t=>[t.id,t.name])),[techItems])
   const tiOrderMap = useMemo(()=>Object.fromEntries(techItems.map(t=>[t.id,t.order])),[techItems])
@@ -583,7 +594,8 @@ export function GanttChart() {
                   <EditTextCell value={a.name} field="name" activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
-                    style={{left:colLeft(1),width:COLS[1].w}} sticky bgClass={stickyBg}/>
+                    style={{left:colLeft(1),width:COLS[1].w}} sticky bgClass={stickyBg}
+                    delayed={isDelayed(a)}/>
                   <EditDateCell field="start_date" activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
@@ -598,10 +610,10 @@ export function GanttChart() {
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
                     style={{left:colLeft(4),width:COLS[4].w}} sticky warnEmpty={completionMissing} bgClass={stickyBg}/>
-                  <EditTextCell value={a.assignee} field="assignee" activity={a}
+                  <EditAssigneeCell activity={a} members={members}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
-                    style={{left:colLeft(5),width:COLS[5].w}} sticky bgClass={stickyBg}/>
+                    style={{left:colLeft(5),width:COLS[5].w}} bgClass={stickyBg}/>
                   <EditStatusCell activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
@@ -713,7 +725,7 @@ export function GanttChart() {
 
             {/* Draft rows */}
             {draftRows.map((d,di)=>(
-              <DraftActivityRow key={d._id} draft={d} techItems={techItems}
+              <DraftActivityRow key={d._id} draft={d} techItems={techItems} members={members}
                 weeks={weeks} months={months} viewUnit={viewUnit}
                 onUpdate={u=>updateDraft(d._id,u)} onSave={()=>saveDraft(d)} onCancel={()=>removeDraft(d._id)}
                 rowIndex={sorted.length+di}/>
@@ -743,8 +755,8 @@ function ActionBtn({children,onClick,title,color}:{children:React.ReactNode;onCl
 }
 
 // ── DraftActivityRow ──────────────────────────────────────────────────────────
-function DraftActivityRow({draft,techItems,weeks,months,viewUnit,onUpdate,onSave,onCancel,rowIndex}:{
-  draft:DraftRow;techItems:TechItem[];weeks:WeekInfo[];months:MonthInfo[];viewUnit:'week'|'month';
+function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdate,onSave,onCancel,rowIndex}:{
+  draft:DraftRow;techItems:TechItem[];members:Member[];weeks:WeekInfo[];months:MonthInfo[];viewUnit:'week'|'month';
   onUpdate:(u:Partial<DraftRow>)=>void;onSave:()=>void;onCancel:()=>void;rowIndex:number;
 }) {
   const rowBg=rowIndex%2===0?'':'bg-slate-50/60 dark:bg-slate-800/30'
@@ -780,7 +792,10 @@ function DraftActivityRow({draft,techItems,weeks,months,viewUnit,onUpdate,onSave
         <input type="date" className={inp} value={draft.completion_date} onKeyDown={kd} onChange={e=>upd('completion_date',e.target.value)}/>
       </td>
       <td className={td} style={{left:colLeft(5),width:COLS[5].w}}>
-        <input className={inp} placeholder="담당자" value={draft.assignee} onKeyDown={kd} onChange={e=>upd('assignee',e.target.value)}/>
+        <select className={`${inp} cursor-pointer`} value={draft.assignee} onKeyDown={kd} onChange={e=>upd('assignee',e.target.value)}>
+          <option value="">미지정</option>
+          {members.map(m=><option key={m.user_id} value={m.name}>{m.name}</option>)}
+        </select>
       </td>
       <td className={td} style={{left:colLeft(6),width:COLS[6].w}}>
         <select className={`${inp} cursor-pointer`} value={draft.status} onKeyDown={kd} onChange={e=>upd('status',e.target.value)}>
@@ -807,14 +822,17 @@ function DraftActivityRow({draft,techItems,weeks,months,viewUnit,onUpdate,onSave
 // ── Editable cell components ──────────────────────────────────────────────────
 const sTd='border-b border-r border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 overflow-hidden h-9 sticky z-10'
 
-interface ECBase { activity:Activity; field:string; editing:{id:number;field:string}|null; draft:string; setDraft:(v:string)=>void; startEdit:(a:Activity,f:string)=>void; commitEdit:(a:Activity)=>void; cancelEdit:()=>void; style:React.CSSProperties; sticky?:boolean; warnEmpty?:boolean; previewValue?: string|null; bgClass?:string }
+interface ECBase { activity:Activity; field:string; editing:{id:number;field:string}|null; draft:string; setDraft:(v:string)=>void; startEdit:(a:Activity,f:string)=>void; commitEdit:(a:Activity)=>void; cancelEdit:()=>void; style:React.CSSProperties; sticky?:boolean; warnEmpty?:boolean; previewValue?: string|null; bgClass?:string; delayed?:boolean }
 
-function EditTextCell({value,activity,field,editing,draft,setDraft,startEdit,commitEdit,cancelEdit,style,warnEmpty,bgClass}:ECBase&{value:string}) {
+function EditTextCell({value,activity,field,editing,draft,setDraft,startEdit,commitEdit,cancelEdit,style,warnEmpty,bgClass,delayed}:ECBase&{value:string}) {
   const isE=editing?.id===activity.id&&editing.field===field
   return (
     <td className={`${sTd} cursor-text ${warnEmpty?'ring-1 ring-inset ring-red-400':''} ${bgClass??'bg-white dark:bg-slate-900'}`} style={style} onClick={()=>!isE&&startEdit(activity,field)}>
       {isE ? <input autoFocus className="gcell-input" value={draft} onChange={e=>setDraft(e.target.value)} onBlur={()=>commitEdit(activity)} onKeyDown={e=>{if(e.key==='Enter')commitEdit(activity);if(e.key==='Escape')cancelEdit()}}/>
-           : <span className="block truncate px-2 leading-9">{value||<span className="text-slate-300 dark:text-slate-600">—</span>}</span>}
+           : <span className={`flex items-center gap-1 truncate px-2 leading-9 ${delayed?'text-red-500 dark:text-red-400 font-medium':''}`}>
+               {delayed&&<AlertTriangle size={11} className="flex-shrink-0 text-red-500 dark:text-red-400"/>}
+               {value||<span className="text-slate-300 dark:text-slate-600">—</span>}
+             </span>}
     </td>
   )
 }
@@ -858,6 +876,23 @@ function EditSelectCell({activity,techItems,tiMap,editing,draft,setDraft,startEd
                {techItems.map(ti=><option key={ti.id} value={ti.id}>{ti.name}</option>)}
              </select>
            : <span className="block truncate px-2 leading-9 text-slate-500 dark:text-slate-400">{tiMap[activity.tech_item_id]??'—'}</span>}
+    </td>
+  )
+}
+
+function EditAssigneeCell({activity,members,editing,draft,setDraft,startEdit,commitEdit,cancelEdit,style,bgClass}:Omit<ECBase,'field'>&{members:Member[]}) {
+  const field='assignee'; const isE=editing?.id===activity.id&&editing.field===field
+  const val=activity.assignee??''
+  return (
+    <td className={`${sTd} cursor-pointer ${bgClass??'bg-white dark:bg-slate-900'}`} style={style} onClick={()=>!isE&&startEdit(activity,field)}>
+      {isE ? <select autoFocus className="gcell-input cursor-pointer" value={draft}
+                onChange={e=>setDraft(e.target.value)}
+                onBlur={()=>commitEdit(activity)} onKeyDown={e=>{if(e.key==='Enter')commitEdit(activity);if(e.key==='Escape')cancelEdit()}}>
+               <option value="">미지정</option>
+               {members.map(m=><option key={m.user_id} value={m.name}>{m.name}</option>)}
+               {val&&!members.some(m=>m.name===val)&&<option value={val}>{val}</option>}
+             </select>
+           : <span className="block truncate px-2 leading-9">{val||<span className="text-slate-300 dark:text-slate-600">—</span>}</span>}
     </td>
   )
 }

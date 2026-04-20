@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { format, addWeeks } from 'date-fns'
 import toast from 'react-hot-toast'
-import { createActivity, updateActivity, getTechItems } from '../../api'
+import { createActivity, updateActivity, getTechItems, getMembers } from '../../api'
 import type { Activity } from '../../types'
 
 interface Props {
@@ -39,6 +39,11 @@ export function ActivityModal({ projectId, defaultTechItemId, activity, onClose 
   const { data: techItems = [] } = useQuery({
     queryKey: ['tech_items', projectId],
     queryFn: () => getTechItems(projectId),
+  })
+
+  const { data: members = [] } = useQuery({
+    queryKey: ['members', projectId],
+    queryFn: () => getMembers(projectId),
   })
 
   const invalidate = (ti: number) => {
@@ -142,8 +147,16 @@ export function ActivityModal({ projectId, defaultTechItemId, activity, onClose 
                 onChange={e => setCompletionDate(e.target.value)} />
             </Field>
             <Field label="담당자">
-              <input className={inputCls} value={assignee} onChange={e => setAssignee(e.target.value)}
-                placeholder="담당자" />
+              <select className={selectCls} value={assignee} onChange={e => setAssignee(e.target.value)}>
+                <option value="">미지정</option>
+                {members.map(m => (
+                  <option key={m.user_id} value={m.name}>{m.name} ({m.knox_id})</option>
+                ))}
+                {/* 기존 데이터가 현재 멤버 목록에 없는 경우 표시 */}
+                {assignee && !members.some(m => m.name === assignee) && (
+                  <option value={assignee}>{assignee}</option>
+                )}
+              </select>
             </Field>
           </div>
 
