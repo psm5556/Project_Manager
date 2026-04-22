@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 import { useApp } from '../contexts/AppContext'
 import {
   getProjectActivities, getTechItemActivities, getTechItems,
-  createActivity, updateActivity, deleteActivity, getMembers, createTechItem,
+  createActivity, updateActivity, deleteActivity, getMembers, createTechItem, reorderTechItems,
 } from '../api'
 import { ActivityModal } from './modals/ActivityModal'
 import type { Activity, TechItem, Member } from '../types'
@@ -621,29 +621,46 @@ export function GanttChart() {
     if (!text) return
     const rows = text.split(/\r?\n/).map(r=>r.split('\t')).filter(r=>r.some(c=>c.trim()))
     if (!rows.length) return
-    // only intercept multi-cell pastes (has tab or multiple lines)
     if (rows.length===1 && rows[0].length===1) return
     e.preventDefault(); e.stopPropagation()
 
     const FIELDS = ['tech_item_id','name','start_date','end_date','completion_date','assignee','status','notes'] as const
     type F = typeof FIELDS[number]
 
-    // Tech Item: 존재하면 ID 반환, 없으면 순서를 유지하며 자동 생성
-    const tiCache = new Map<string, number>(techItems.map(t=>[t.name.toLowerCase(),t.id]))
-    const maxExistingOrder = techItems.length ? Math.max(...techItems.map(t=>t.order)) : -1
-    let nextOrder = maxExistingOrder + 1
+    const startColIdx = pasteAnchor?.colIdx ?? 0
+    const tiColOffset = 0 - startColIdx // offset of tech_item_id within paste columns
+    const hasTiCol = tiColOffset >= 0
+
+    const tiCache = new Map<string, number>(techItems.map(t=>[t.name.toLowerCase(), t.id]))
     let newTiCount = 0
-    const getOrCreateTiId = async (v: string): Promise<number|null> => {
-      if (!v.trim()) return null
-      const key = v.trim().toLowerCase()
-      if (tiCache.has(key)) return tiCache.get(key)!
-      if (!selectedProjectId) return null
-      try {
-        const ti = await createTechItem({ project_id: selectedProjectId, name: v.trim(), order: nextOrder++ })
-        tiCache.set(key, ti.id)
-        newTiCount++
-        return ti.id
-      } catch { return null }
+
+    // ── Step 1: Tech Item 전처리 (붙여넣기 등장 순서대로 생성 + 전체 재조정) ──
+    if (hasTiCol) {
+      const seenKeys = new Set<string>()
+      const pastedTiNames: string[] = []
+      for (const row of rows) {
+        const raw = (row[tiColOffset] ?? '').trim()
+        if (!raw) continue
+        const key = raw.toLowerCase()
+        if (seenKeys.has(key)) continue
+        seenKeys.add(key)
+        pastedTiNames.push(raw)
+        if (!tiCache.has(key) && selectedProjectId) {
+          try {
+            const ti = await createTechItem({ project_id: selectedProjectId, name: raw, order: 9999 })
+            tiCache.set(key, ti.id)
+            newTiCount++
+          } catch { /* skip */ }
+        }
+      }
+      // 붙여넣기 순서대로 order 재조정: 붙여넣기 항목 → 나머지 기존 항목
+      if (selectedProjectId && pastedTiNames.length > 0) {
+        const pastedIds = pastedTiNames.map(n=>tiCache.get(n.toLowerCase())).filter((id): id is number => id !== undefined)
+        const pastedSet = new Set(pastedIds)
+        const otherIds = [...techItems].sort((a,b)=>a.order-b.order).map(t=>t.id).filter(id=>!pastedSet.has(id))
+        const reorderList = [...pastedIds, ...otherIds].map((id, i) => ({ id, order: i }))
+        try { await reorderTechItems(selectedProjectId, reorderList) } catch { /* ignore */ }
+      }
     }
 
     const parseDate = (v:string): string|null => {
@@ -663,7 +680,6 @@ export function GanttChart() {
     }
 
     const startRowIdx = pasteAnchor ? Math.max(0, sorted.findIndex(a=>a.id===pasteAnchor.actId)) : 0
-    const startColIdx = pasteAnchor?.colIdx ?? 0
     let updated=0, created=0, failed=0
 
     for (let ri=0; ri<rows.length; ri++) {
@@ -676,10 +692,16 @@ export function GanttChart() {
         if (fi >= FIELDS.length) break
         const field = FIELDS[fi]
         const raw = cols[ci].trim()
-        if (field==='tech_item_id')  { const id=await getOrCreateTiId(raw); if(id!==null) values.tech_item_id=id }
-        else if (field==='start_date'||field==='end_date'||field==='completion_date') values[field]=parseDate(raw)
-        else if (field==='status')   { if(raw) values.status=parseStatus(raw) }
-        else                         { values[field as 'name'|'assignee'|'notes'] = raw||undefined }
+        if (field==='tech_item_id') {
+          const id = tiCache.get(raw.toLowerCase()) ?? null
+          if (id !== null) values.tech_item_id = id
+        } else if (field==='start_date'||field==='end_date'||field==='completion_date') {
+          values[field] = parseDate(raw)
+        } else if (field==='status') {
+          values.status = parseStatus(raw) // 빈값·잘못된값 → 'review'
+        } else {
+          values[field as 'name'|'assignee'|'notes'] = raw || undefined
+        }
       }
       if (Object.keys(values).length===0) continue
 
@@ -710,7 +732,7 @@ export function GanttChart() {
     }
 
     invalidate()
-    if (newTiCount > 0 && selectedProjectId)
+    if ((newTiCount > 0 || hasTiCol) && selectedProjectId)
       qc.invalidateQueries({ queryKey: ['tech_items', selectedProjectId] })
     const parts=[
       newTiCount&&`Tech Item ${newTiCount}개 생성`,
