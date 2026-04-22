@@ -244,6 +244,7 @@ export function GanttChart() {
   const [actModal,  setActModal]  = useState<{open:boolean;activity?:Activity}>({open:false})
   const [draftRows, setDraftRows] = useState<DraftRow[]>([])
   const [viewUnit,  setViewUnit]  = useState<'week'|'month'>('week')
+  const [pasteAnchor, setPasteAnchor] = useState<{actId:number;colIdx:number}|null>(null)
   const savingRef    = useRef<Set<string>>(new Set())
   const fixedRef     = useRef<Set<number>>(new Set())
   const viewUnitRef  = useRef<'week'|'month'>('week')
@@ -614,6 +615,88 @@ export function GanttChart() {
     el.href=url; el.download='gantt.xlsx'; el.click(); URL.revokeObjectURL(url)
   },[sorted,tiMap,weeks,months,viewUnit,nowW,nowM])
 
+  // ── Paste handler ─────────────────────────────────────────────
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    const text = e.clipboardData.getData('text')
+    if (!text) return
+    const rows = text.split(/\r?\n/).map(r=>r.split('\t')).filter(r=>r.some(c=>c.trim()))
+    if (!rows.length) return
+    // only intercept multi-cell pastes (has tab or multiple lines)
+    if (rows.length===1 && rows[0].length===1) return
+    e.preventDefault(); e.stopPropagation()
+
+    const FIELDS = ['tech_item_id','name','start_date','end_date','completion_date','assignee','status','notes'] as const
+    type F = typeof FIELDS[number]
+
+    const parseTiId = (v:string) => techItems.find(t=>t.name.toLowerCase()===v.toLowerCase().trim())?.id ?? null
+    const parseDate = (v:string): string|null => {
+      if (!v.trim()) return null
+      const s = v.trim()
+      let m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/)
+      if (m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`
+      m = s.match(/^(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?\s*$/)
+      if (m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`
+      const d = new Date(s)
+      if (!isNaN(d.getTime())) return format(d, 'yyyy-MM-dd')
+      return null
+    }
+    const parseStatus = (v:string) => {
+      const map: Record<string,string> = { '검토':'review','진행':'in_progress','완료':'complete',review:'review',in_progress:'in_progress',complete:'complete' }
+      return map[v.trim()] ?? 'review'
+    }
+
+    const startRowIdx = pasteAnchor ? Math.max(0, sorted.findIndex(a=>a.id===pasteAnchor.actId)) : 0
+    const startColIdx = pasteAnchor?.colIdx ?? 0
+    let updated=0, created=0, failed=0
+
+    for (let ri=0; ri<rows.length; ri++) {
+      const cols = rows[ri]
+      const targetIdx = startRowIdx + ri
+      const values: Partial<Record<F, any>> = {}
+
+      for (let ci=0; ci<cols.length; ci++) {
+        const fi = startColIdx + ci
+        if (fi >= FIELDS.length) break
+        const field = FIELDS[fi]
+        const raw = cols[ci].trim()
+        if (field==='tech_item_id')  { const id=parseTiId(raw); if(id!==null) values.tech_item_id=id }
+        else if (field==='start_date'||field==='end_date'||field==='completion_date') values[field]=parseDate(raw)
+        else if (field==='status')   { if(raw) values.status=parseStatus(raw) }
+        else                         { values[field as 'name'|'assignee'|'notes'] = raw||undefined }
+      }
+      if (Object.keys(values).length===0) continue
+
+      if (targetIdx < sorted.length) {
+        const a = sorted[targetIdx]
+        const patch = {
+          tech_item_id: values.tech_item_id??a.tech_item_id, name: values.name??a.name,
+          start_date:      'start_date'      in values ? values.start_date      : a.start_date,
+          end_date:        'end_date'        in values ? values.end_date        : a.end_date,
+          completion_date: 'completion_date' in values ? values.completion_date : a.completion_date,
+          assignee: values.assignee??a.assignee, status: values.status??a.status,
+          notes: values.notes??a.notes, order: a.order, version: a.version,
+        }
+        try { await updateActivity(a.id, patch); updated++ } catch { failed++ }
+      } else {
+        if (!values.name) continue
+        const fallbackTi = sorted.length ? sorted[sorted.length-1].tech_item_id : techItems[0]?.id
+        const tiId = values.tech_item_id ?? fallbackTi
+        if (!tiId) continue
+        try {
+          await createActivity({ tech_item_id:tiId, name:values.name, order:0,
+            start_date:values.start_date??null, end_date:values.end_date??null,
+            completion_date:values.completion_date??null,
+            assignee:values.assignee??'', status:values.status??'review', notes:values.notes??'' })
+          created++
+        } catch { failed++ }
+      }
+    }
+
+    invalidate()
+    const parts=[updated&&`${updated}개 수정`,created&&`${created}개 생성`,failed&&`${failed}개 실패`].filter(Boolean)
+    if (parts.length) toast[failed?'error':'success'](parts.join(', '))
+  }, [pasteAnchor, sorted, techItems, invalidate])
+
   // ── Empty / loading ───────────────────────────────────────────
   if(!selectedProjectId&&!selectedTechItemId) return (
     <div className="flex-1 flex items-center justify-center bg-slate-50 dark:bg-slate-950">
@@ -666,7 +749,7 @@ export function GanttChart() {
             <span className="ml-1.5 px-1.5 py-0.5 bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 rounded text-[11px]">+{draftRows.length} 작성중</span>
           )}
         </span>
-        <span className="text-[11px] text-slate-400 hidden md:block">· 바를 드래그하여 날짜 조정</span>
+        <span className="text-[11px] text-slate-400 hidden md:block">· 바 드래그: 날짜 조정 &nbsp;· 행 클릭 후 Ctrl+V: 붙여넣기</span>
         <div className="ml-auto flex items-center gap-2">
           {/* 주/월 토글 */}
           <div className="flex rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden text-[12px]">
@@ -695,7 +778,8 @@ export function GanttChart() {
       </div>
 
       {/* Table */}
-      <div className={`flex-1 overflow-auto mx-4 my-3 rounded-xl border border-slate-200 dark:border-slate-700 ${dragging?'select-none':''}`}>
+      <div className={`flex-1 overflow-auto mx-4 my-3 rounded-xl border border-slate-200 dark:border-slate-700 ${dragging?'select-none':''}`}
+        onPaste={handlePaste}>
         {(() => {
           const colCount = viewUnit==='week' ? weeks.length : months.length
           const unitW    = viewUnit==='week' ? WEEK_W : MONTH_W
@@ -798,9 +882,17 @@ export function GanttChart() {
                 </tr>
               ) : null
 
+              const isAnchor = pasteAnchor?.actId===a.id
               const actRow = (
                 <tr key={a.id}
-                  className={`group ${rowBg} ${!dragging?'hover:bg-brand-50/40 dark:hover:bg-brand-900/10':''} transition-colors`}
+                  onClick={(e)=>{
+                    const td=(e.target as HTMLElement).closest('td') as HTMLTableCellElement|null
+                    if(!td) return
+                    const allTds=Array.from(td.parentElement?.querySelectorAll('td')??[])
+                    const colIdx=Math.max(0, Math.min(allTds.indexOf(td)-1, COLS.length-1))
+                    setPasteAnchor({actId:a.id, colIdx})
+                  }}
+                  className={`group ${rowBg} ${!dragging?'hover:bg-brand-50/40 dark:hover:bg-brand-900/10':''} transition-colors ${isAnchor?'outline outline-1 outline-offset-[-1px] outline-blue-400 dark:outline-blue-500':''}`}
                   style={{height:36}}>
 
                   {/* Action buttons */}
