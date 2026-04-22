@@ -225,6 +225,50 @@ def me(current_user: models.User = Depends(get_current_user)):
     return current_user
 
 
+@app.patch("/api/auth/me", response_model=schemas.UserResponse)
+def update_profile(
+    body: schemas.ProfileUpdate,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(400, "이름을 입력하세요")
+        current_user.name = name
+    if body.knox_id is not None:
+        knox_id = body.knox_id.strip()
+        if not knox_id:
+            raise HTTPException(400, "Knox ID를 입력하세요")
+        existing = db.query(models.User).filter(
+            models.User.knox_id == knox_id,
+            models.User.id != current_user.id,
+        ).first()
+        if existing:
+            raise HTTPException(409, "이미 사용 중인 Knox ID입니다")
+        current_user.knox_id = knox_id
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@app.post("/api/auth/me/reset-pin")
+def reset_own_pin(
+    body: schemas.ResetOwnPin,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not auth_utils.verify_pin(body.current_pin, current_user.pin_hash, current_user.pin_salt):
+        raise HTTPException(400, "현재 PIN이 올바르지 않습니다")
+    if len(body.new_pin) != 6 or not body.new_pin.isdigit():
+        raise HTTPException(400, "새 PIN은 6자리 숫자여야 합니다")
+    pin_hash, pin_salt = auth_utils.hash_pin(body.new_pin)
+    current_user.pin_hash = pin_hash
+    current_user.pin_salt = pin_salt
+    db.commit()
+    return {"message": "PIN이 변경되었습니다"}
+
+
 # ─── User search ──────────────────────────────────────────────────────────────
 
 @app.get("/api/users/search", response_model=List[schemas.UserResponse])
@@ -455,13 +499,34 @@ async def update_tech_item(
         raise HTTPException(409, "Version conflict — please reload and retry")
     obj.name = body.name
     obj.description = body.description or ""
-    obj.order = body.order or 0
+    if body.order is not None:
+        obj.order = body.order
     obj.version += 1
     obj.updated_at = datetime.now()
     db.commit()
     db.refresh(obj)
     await manager.broadcast({"type": "tech_item_updated", "data": {"id": tid, "project_id": obj.project_id}})
     return obj
+
+
+@app.patch("/api/projects/{pid}/tech_items/reorder")
+async def reorder_tech_items(
+    pid: int,
+    body: List[schemas.TechItemReorderItem],
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    require_member(pid, current_user, db)
+    for item in body:
+        ti = db.query(models.TechItem).filter(
+            models.TechItem.id == item.id,
+            models.TechItem.project_id == pid,
+        ).first()
+        if ti:
+            ti.order = item.order
+    db.commit()
+    await manager.broadcast({"type": "tech_items_reordered", "data": {"project_id": pid}})
+    return {"ok": True}
 
 
 @app.delete("/api/tech_items/{tid}")

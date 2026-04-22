@@ -5,7 +5,7 @@ import {
   parseISO, isWithinInterval, addDays, format, getMonth, getYear,
   startOfMonth, endOfMonth, addMonths,
 } from 'date-fns'
-import { Trash2, Plus, Pencil, Check, X as XIcon, Download, AlertTriangle } from 'lucide-react'
+import { Trash2, Plus, Pencil, Check, X as XIcon, AlertTriangle, PanelLeftClose, PanelLeftOpen, FileSpreadsheet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useApp } from '../contexts/AppContext'
 import {
@@ -169,7 +169,7 @@ function monthCellState(a: Activity, m: MonthInfo): CellState {
 
 // ── Draft row ─────────────────────────────────────────────────────────────────
 interface DraftRow {
-  _id:string; tech_item_id:number|null; name:string
+  _id:string; insertAfter?:number; tech_item_id:number|null; name:string
   start_date:string; end_date:string; completion_date:string
   assignee:string; status:string; notes:string
 }
@@ -211,7 +211,27 @@ function useInlineEdit(projectId:number|null, techItemId:number|null) {
   })
 
   const startEdit  = useCallback((a:Activity,f:string)=>{ setEditing({id:a.id,field:f}); setDraft(String((a as any)[f]??'')) },[])
-  const commitEdit = useCallback((a:Activity)=>{ if(!editing||editing.id!==a.id) return; mut.mutate({id:a.id,patch:buildPatch(a,editing.field,draft)}) },[editing,draft,mut])
+  const commitEdit = useCallback((a:Activity)=>{
+    if(!editing||editing.id!==a.id) return
+    const isDate = editing.field==='start_date'||editing.field==='end_date'||editing.field==='completion_date'
+    if(isDate&&draft){
+      const m=draft.match(/^(\d{4})-\d{2}-\d{2}$/)
+      if(!m||isNaN(new Date(draft).getTime())){
+        toast.error('날짜 형식이 올바르지 않습니다 (YYYY-MM-DD)'); setEditing(null); return
+      }
+      const yr=parseInt(m[1])
+      if(yr<1999||yr>9999){
+        toast.error('년도는 1999~9999 사이여야 합니다'); setEditing(null); return
+      }
+    }
+    if(editing.field==='start_date'&&draft&&a.end_date&&draft>a.end_date){
+      toast.error('시작일이 종료일보다 늦을 수 없습니다'); setEditing(null); return
+    }
+    if(editing.field==='end_date'&&draft&&a.start_date&&draft<a.start_date){
+      toast.error('종료일이 시작일보다 빠를 수 없습니다'); setEditing(null); return
+    }
+    mut.mutate({id:a.id,patch:buildPatch(a,editing.field,draft)})
+  },[editing,draft,mut])
   const saveField  = useCallback((a:Activity,f:string,v:string)=>{ mut.mutate({id:a.id,patch:buildPatch(a,f,v)}) },[mut])
   const cancelEdit = useCallback(()=>setEditing(null),[])
   return { editing, draft, setDraft, startEdit, commitEdit, saveField, cancelEdit }
@@ -219,7 +239,7 @@ function useInlineEdit(projectId:number|null, techItemId:number|null) {
 
 // ── GanttChart ────────────────────────────────────────────────────────────────
 export function GanttChart() {
-  const { selectedProjectId, selectedTechItemId } = useApp()
+  const { selectedProjectId, selectedTechItemId, sidebarOpen, toggleSidebar } = useApp()
   const qc = useQueryClient()
   const [actModal,  setActModal]  = useState<{open:boolean;activity?:Activity}>({open:false})
   const [draftRows, setDraftRows] = useState<DraftRow[]>([])
@@ -372,7 +392,7 @@ export function GanttChart() {
   },[dragging,viewUnit])
 
   // ── Draft management ──────────────────────────────────────────
-  const addDraftRow   = (tiId?:number)=>setDraftRows(prev=>[...prev,{...emptyDraft(techItems,selectedTechItemId),tech_item_id:tiId??selectedTechItemId??techItems[0]?.id??null}])
+  const addDraftRow   = (tiId?:number,insertAfter?:number)=>setDraftRows(prev=>[...prev,{...emptyDraft(techItems,selectedTechItemId),tech_item_id:tiId??selectedTechItemId??techItems[0]?.id??null,insertAfter}])
   const updateDraft   = (id:string,u:Partial<DraftRow>)=>setDraftRows(prev=>prev.map(r=>r._id===id?{...r,...u}:r))
   const removeDraft   = (id:string)=>setDraftRows(prev=>prev.filter(r=>r._id!==id))
   const saveDraft = async(d:DraftRow)=>{
@@ -388,19 +408,211 @@ export function GanttChart() {
     } finally{ savingRef.current.delete(d._id) }
   }
 
-  const downloadCSV = useCallback(()=>{
-    const headers = ['Tech Item','Activity','시작일','종료일','완료일','담당자','상태','메모']
-    const rows = sorted.map(a=>[
-      tiMap[a.tech_item_id]??'', a.name,
-      a.start_date??'', a.end_date??'', a.completion_date??'',
-      a.assignee??'', STATUS_LABEL[a.status]??a.status, a.notes??'',
-    ])
-    const csv = [headers,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')
-    const blob = new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'})
+  const downloadExcel = useCallback(async ()=>{
+    const ExcelJS = (await import('exceljs')).default
+
+    // ── 색상 상수 ──────────────────────────────────────────────────
+    const C = {
+      headerBg:   'F1F5F9', headerFg:   '334155',
+      yearBg:     'E2E8F0', yearFg:     '1E293B',
+      todayBg:    'BFDBFE', todayFg:    '1E3A5F',
+      review:     { bg:'FEF3C7', fg:'92400E' },
+      in_progress:{ bg:'DBEAFE', fg:'1E40AF' },
+      complete:   { bg:'D1FAE5', fg:'065F46' },
+      completion: { bg:'EDE9FE', fg:'5B21B6' },
+      rowEven:    'FFFFFF', rowOdd: 'F8FAFC',
+    }
+
+    const wb = new ExcelJS.Workbook()
+    wb.creator = 'Project Manager'
+    const ws = wb.addWorksheet('간트차트', { views:[{state:'frozen',xSplit:8,ySplit:viewUnit==='week'?3:2}] })
+
+    const periods   = viewUnit==='week' ? weeks : months
+    const headerRows = viewUnit==='week' ? 3 : 2
+    const FIXED = 8  // 고정 컬럼 수
+
+    // ── 열 너비 ────────────────────────────────────────────────────
+    const colWidths = [
+      COLS[0].w/7, COLS[1].w/7, COLS[2].w/7, COLS[3].w/7,
+      COLS[4].w/7, COLS[5].w/7, COLS[6].w/7, COLS[7].w/7,
+      ...periods.map(()=> viewUnit==='week' ? WEEK_W/7 : MONTH_W/7),
+    ]
+    ws.columns = colWidths.map(w=>({ width: Math.max(4, Math.round(w)) }))
+
+    // ── 헬퍼 ───────────────────────────────────────────────────────
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hStyle = (cell: any, bg: string=C.headerBg, fg: string=C.headerFg)=>{
+      cell.fill   = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+bg} }
+      cell.font   = { bold:true, color:{argb:'FF'+fg}, size:9 }
+      cell.alignment = { horizontal:'center', vertical:'middle', wrapText:false }
+      cell.border = {
+        top:{style:'thin',color:{argb:'FFCBD5E1'}}, bottom:{style:'thin',color:{argb:'FFCBD5E1'}},
+        left:{style:'thin',color:{argb:'FFCBD5E1'}}, right:{style:'thin',color:{argb:'FFCBD5E1'}},
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fillCell = (cell: any, bg: string, fg: string)=>{
+      cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+bg} }
+      cell.font = { color:{argb:'FF'+fg}, size:9 }
+      cell.alignment = { horizontal:'center', vertical:'middle' }
+      cell.border = { top:{style:'hair',color:{argb:'FFE2E8F0'}}, bottom:{style:'hair',color:{argb:'FFE2E8F0'}},
+                      left:{style:'hair',color:{argb:'FFE2E8F0'}}, right:{style:'hair',color:{argb:'FFE2E8F0'}} }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dataStyle = (cell: any, rowBg: string)=>{
+      cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+rowBg} }
+      cell.font = { size:9 }
+      cell.alignment = { horizontal:'left', vertical:'middle' }
+      cell.border = { top:{style:'hair',color:{argb:'FFE2E8F0'}}, bottom:{style:'hair',color:{argb:'FFE2E8F0'}},
+                      left:{style:'hair',color:{argb:'FFE2E8F0'}}, right:{style:'hair',color:{argb:'FFE2E8F0'}} }
+    }
+
+    // ── 오늘 판별 ──────────────────────────────────────────────────
+    const isCurrentPeriod = (idx: number)=>{
+      if(viewUnit==='week'){
+        const w=weeks[idx]; return w.year===nowW.y && w.week===nowW.w
+      } else {
+        const m=months[idx]; return m.year===nowM.y && m.month===nowM.m
+      }
+    }
+
+    // ── 행 1 : 년 그룹 (고정컬럼 병합 포함) ──────────────────────
+    const row1 = ws.getRow(1); row1.height = 18
+    for(let c=1; c<=FIXED; c++){
+      const cell = row1.getCell(c)
+      cell.value = COLS[c-1].label
+      hStyle(cell)
+    }
+    // 년 그룹
+    let colCursor = FIXED+1
+    const yearGroups = viewUnit==='week' ? buildYearGroups(weeks) : buildMonthYearGroups(months)
+    for(const g of yearGroups){
+      const startC=colCursor, endC=colCursor+g.count-1
+      const cell = row1.getCell(startC)
+      cell.value = g.label
+      hStyle(cell, C.yearBg, C.yearFg)
+      if(endC>startC) ws.mergeCells(1,startC,1,endC)
+      colCursor = endC+1
+    }
+
+    if(viewUnit==='week'){
+      // 고정 컬럼: 행1~3 병합
+      for(let c=1; c<=FIXED; c++) ws.mergeCells(1,c,3,c)
+
+      // ── 행 2 : 월 그룹 ──────────────────────────────────────────
+      const row2 = ws.getRow(2); row2.height = 16
+      const mGroups = buildMonthGroups(weeks)
+      let cur2 = FIXED+1
+      for(const g of mGroups){
+        const startC=cur2, endC=cur2+g.count-1
+        const cell = row2.getCell(startC)
+        cell.value = g.label
+        hStyle(cell)
+        if(endC>startC) ws.mergeCells(2,startC,2,endC)
+        cur2 = endC+1
+      }
+
+      // ── 행 3 : 주차 ─────────────────────────────────────────────
+      const row3 = ws.getRow(3); row3.height = 14
+      weeks.forEach((w,i)=>{
+        const cell = row3.getCell(FIXED+1+i)
+        cell.value = `${w.week}주`
+        const isCur = w.year===nowW.y && w.week===nowW.w
+        hStyle(cell, isCur?C.todayBg:C.headerBg, isCur?C.todayFg:C.headerFg)
+      })
+
+    } else {
+      // 고정 컬럼: 행1~2 병합
+      for(let c=1; c<=FIXED; c++) ws.mergeCells(1,c,2,c)
+
+      // ── 행 2 : 월 ───────────────────────────────────────────────
+      const row2 = ws.getRow(2); row2.height = 16
+      months.forEach((m,i)=>{
+        const cell = row2.getCell(FIXED+1+i)
+        cell.value = MONTHS_KO[m.month]
+        const isCur = m.year===nowM.y && m.month===nowM.m
+        hStyle(cell, isCur?C.todayBg:C.headerBg, isCur?C.todayFg:C.headerFg)
+      })
+    }
+
+    // ── 데이터 행 ──────────────────────────────────────────────────
+    const dataStartRow = headerRows+1
+    sorted.forEach((a,ri)=>{
+      const rowBg = ri%2===0 ? C.rowEven : C.rowOdd
+      const dr = ws.getRow(dataStartRow+ri)
+      dr.height = 16
+
+      const fixedVals = [
+        tiMap[a.tech_item_id]??'', a.name,
+        a.start_date??'', a.end_date??'', a.completion_date??'',
+        a.assignee??'', STATUS_LABEL[a.status]??a.status, a.notes??'',
+      ]
+      fixedVals.forEach((v,ci)=>{
+        const cell = dr.getCell(ci+1)
+        cell.value = v
+        dataStyle(cell, rowBg)
+        if(ci===6){
+          // 상태 셀은 배경색으로 강조
+          const sc = C[a.status as keyof typeof C] as {bg:string;fg:string}|undefined
+          if(sc){ cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF'+sc.bg}}; cell.font={color:{argb:'FF'+sc.fg},size:9,bold:true}; cell.alignment={horizontal:'center',vertical:'middle'} }
+        }
+      })
+
+      // 타임라인 셀
+      periods.forEach((_,pi)=>{
+        const cell = dr.getCell(FIXED+1+pi)
+        // 완료일 판별
+        const isComp = (()=>{
+          if(!a.completion_date) return false
+          if(viewUnit==='week'){
+            const w=weeks[pi]
+            const wMon=format(w.monday,'yyyy-MM-dd'), wSun=format(addDays(w.monday,6),'yyyy-MM-dd')
+            return a.completion_date>=wMon && a.completion_date<=wSun
+          } else {
+            const m=months[pi]
+            const mF=format(m.firstDay,'yyyy-MM-dd'), mL=format(m.lastDay,'yyyy-MM-dd')
+            return a.completion_date>=mF && a.completion_date<=mL
+          }
+        })()
+        // 범위 내 판별
+        const inRange = (()=>{
+          if(!a.start_date||!a.end_date) return false
+          if(viewUnit==='week'){
+            const w=weeks[pi]
+            const wMon=format(w.monday,'yyyy-MM-dd'), wSun=format(addDays(w.monday,6),'yyyy-MM-dd')
+            return a.start_date<=wSun && a.end_date>=wMon
+          } else {
+            const m=months[pi]
+            const mF=format(m.firstDay,'yyyy-MM-dd'), mL=format(m.lastDay,'yyyy-MM-dd')
+            return a.start_date<=mL && a.end_date>=mF
+          }
+        })()
+
+        if(isComp){
+          fillCell(cell, C.completion.bg, C.completion.fg)
+          cell.value = '●'
+        } else if(inRange){
+          const sc = C[a.status as keyof typeof C] as {bg:string;fg:string}|undefined
+          if(sc) fillCell(cell, sc.bg, sc.fg)
+          cell.value = '■'
+        } else {
+          cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF'+rowBg} }
+          cell.border = { top:{style:'hair',color:{argb:'FFE2E8F0'}}, bottom:{style:'hair',color:{argb:'FFE2E8F0'}},
+                          left:{style:'hair',color:{argb:'FFE2E8F0'}}, right:{style:'hair',color:{argb:'FFE2E8F0'}} }
+        }
+        if(isCurrentPeriod(pi) && !isComp && !inRange){
+          cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFF0F9FF'} }
+        }
+      })
+    })
+
+    // ── 저장 ───────────────────────────────────────────────────────
+    const buf = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})
     const url = URL.createObjectURL(blob)
     const el = document.createElement('a')
-    el.href=url; el.download='activities.csv'; el.click(); URL.revokeObjectURL(url)
-  },[sorted,tiMap])
+    el.href=url; el.download='gantt.xlsx'; el.click(); URL.revokeObjectURL(url)
+  },[sorted,tiMap,weeks,months,viewUnit,nowW,nowM])
 
   // ── Empty / loading ───────────────────────────────────────────
   if(!selectedProjectId&&!selectedTechItemId) return (
@@ -442,6 +654,12 @@ export function GanttChart() {
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800 flex-shrink-0">
+        <button onClick={toggleSidebar} title={sidebarOpen ? '사이드바 접기' : '사이드바 펼치기'}
+          className="w-7 h-7 flex items-center justify-center rounded-lg flex-shrink-0
+            text-slate-400 hover:text-slate-600 hover:bg-slate-100
+            dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors">
+          {sidebarOpen ? <PanelLeftClose size={15}/> : <PanelLeftOpen size={15}/>}
+        </button>
         <span className="text-[13px] font-medium text-slate-600 dark:text-slate-400">
           {sorted.length}개 Activity
           {draftRows.length>0&&(
@@ -465,9 +683,9 @@ export function GanttChart() {
               월
             </button>
           </div>
-          <button onClick={downloadCSV}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-            <Download size={13}/> CSV 다운로드
+          <button onClick={downloadExcel}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium border border-emerald-200 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors">
+            <FileSpreadsheet size={13}/> Excel 다운로드
           </button>
           <button onClick={()=>setActModal({open:true})}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium bg-brand-600 hover:bg-brand-700 text-white transition-colors">
@@ -484,7 +702,7 @@ export function GanttChart() {
           const minW     = ACTION_W + COLS.reduce((s,c)=>s+c.w,0) + colCount*unitW
           const rowSpan  = viewUnit==='week' ? 3 : 2
           return (
-        <table style={{tableLayout:'fixed',borderCollapse:'separate',borderSpacing:0,minWidth:minW}}>
+        <table style={{tableLayout:'fixed',borderCollapse:'separate',borderSpacing:0,minWidth:minW,width:minW}}>
           <colgroup>
             <col style={{width:ACTION_W}}/>
             {COLS.map(c=><col key={c.key} style={{width:c.w}}/>)}
@@ -556,14 +774,31 @@ export function GanttChart() {
               </td></tr>
             )}
 
-            {sorted.map((a,idx)=>{
+            {sorted.flatMap((a,idx)=>{
+              const isGroupStart = idx===0 || sorted[idx-1].tech_item_id !== a.tech_item_id
               const rowBg=idx%2===0?'':'bg-slate-50/60 dark:bg-slate-800/30'
               const stickyBg=idx%2===0?'bg-white dark:bg-slate-900':'bg-slate-50 dark:bg-slate-800'
               const completionMissing=a.status==='complete'&&!a.completion_date
               const isDraggingThis=dragging?.activityId===a.id
               const pa=previewAct(a) // preview dates during drag
 
-              return (
+              const groupHeader = isGroupStart ? (
+                <tr key={`group-${a.tech_item_id}-${idx}`} style={{height:26}}>
+                  <td colSpan={1+COLS.length}
+                    className="sticky left-0 z-10 px-3 border-b border-t-2 border-t-slate-300 dark:border-t-slate-500 border-b-slate-200 dark:border-b-slate-700 bg-slate-100 dark:bg-slate-800/80 whitespace-nowrap"
+                    style={{left:0}}>
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                      {tiMap[a.tech_item_id]??'—'}
+                    </span>
+                  </td>
+                  {(viewUnit==='week'?weeks:months).map((_,pi)=>(
+                    <td key={pi} className="border-b border-t-2 border-t-slate-300 dark:border-t-slate-500 border-b-slate-200 dark:border-b-slate-700 bg-slate-100 dark:bg-slate-800/80"
+                      style={{width:viewUnit==='week'?WEEK_W:MONTH_W}}/>
+                  ))}
+                </tr>
+              ) : null
+
+              const actRow = (
                 <tr key={a.id}
                   className={`group ${rowBg} ${!dragging?'hover:bg-brand-50/40 dark:hover:bg-brand-900/10':''} transition-colors`}
                   style={{height:36}}>
@@ -572,7 +807,7 @@ export function GanttChart() {
                   <td className={`border-b border-r border-slate-200 dark:border-slate-700 text-[11px] overflow-hidden h-9 sticky z-10 ${stickyBg}`}
                     style={{left:0,width:ACTION_W}}>
                     <div className="flex items-center justify-center gap-0.5 h-full px-1">
-                      <ActionBtn title="행 추가 (같은 Tech Item)" onClick={()=>addDraftRow(a.tech_item_id)}
+                      <ActionBtn title="행 추가 (같은 Tech Item)" onClick={()=>addDraftRow(a.tech_item_id,a.id)}
                         color="text-slate-400 hover:text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-900/30">
                         <Plus size={11}/>
                       </ActionBtn>
@@ -600,11 +835,13 @@ export function GanttChart() {
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
                     style={{left:colLeft(2),width:COLS[2].w}} sticky bgClass={stickyBg}
+                    maxDate={a.end_date??undefined}
                     previewValue={isDraggingThis&&dragging.type!=='end'?pa.start_date:undefined}/>
                   <EditDateCell field="end_date" activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
                     style={{left:colLeft(3),width:COLS[3].w}} sticky bgClass={stickyBg}
+                    minDate={a.start_date??undefined}
                     previewValue={isDraggingThis&&dragging.type!=='start'?pa.end_date:undefined}/>
                   <EditDateCell field="completion_date" activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
@@ -661,7 +898,7 @@ export function GanttChart() {
                               </div>
                             )}
                             {cs.isCompletion&&(
-                              <div className="absolute inset-0 flex items-center justify-center z-10">
+                              <div className="absolute inset-0 flex items-center justify-center">
                                 <div className="w-4 h-4 rounded-full bg-violet-500 flex items-center justify-center shadow-sm">
                                   <span className="text-white text-[8px] font-bold">✓</span>
                                 </div>
@@ -709,7 +946,7 @@ export function GanttChart() {
                               </div>
                             )}
                             {cs.isCompletion&&(
-                              <div className="absolute inset-0 flex items-center justify-center z-10">
+                              <div className="absolute inset-0 flex items-center justify-center">
                                 <div className="w-4 h-4 rounded-full bg-violet-500 flex items-center justify-center shadow-sm">
                                   <span className="text-white text-[8px] font-bold">✓</span>
                                 </div>
@@ -721,10 +958,21 @@ export function GanttChart() {
                   }
                 </tr>
               )
+              // draft rows inserted right after this activity
+              const inlineDrafts = draftRows
+                .filter(d=>d.insertAfter===a.id)
+                .map((d,di)=>(
+                  <DraftActivityRow key={d._id} draft={d} techItems={techItems} members={members}
+                    weeks={weeks} months={months} viewUnit={viewUnit}
+                    onUpdate={u=>updateDraft(d._id,u)} onSave={()=>saveDraft(d)} onCancel={()=>removeDraft(d._id)}
+                    rowIndex={idx*10+di}/>
+                ))
+
+              return [groupHeader, actRow, ...inlineDrafts].filter(Boolean)
             })}
 
-            {/* Draft rows */}
-            {draftRows.map((d,di)=>(
+            {/* Draft rows appended at the end (head + button) */}
+            {draftRows.filter(d=>d.insertAfter===undefined).map((d,di)=>(
               <DraftActivityRow key={d._id} draft={d} techItems={techItems} members={members}
                 weeks={weeks} months={months} viewUnit={viewUnit}
                 onUpdate={u=>updateDraft(d._id,u)} onSave={()=>saveDraft(d)} onCancel={()=>removeDraft(d._id)}
@@ -762,6 +1010,7 @@ function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdat
   const rowBg=rowIndex%2===0?'':'bg-slate-50/60 dark:bg-slate-800/30'
   const stickyBg=rowIndex%2===0?'bg-white dark:bg-slate-900':'bg-slate-50 dark:bg-slate-800'
   const inp=`w-full h-full px-1.5 text-[11px] bg-transparent border-none outline-none focus:bg-brand-50/60 dark:focus:bg-brand-900/20 text-slate-700 dark:text-slate-300`
+  const sel=`w-full h-full px-1.5 text-[11px] border-none outline-none cursor-pointer bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 [color-scheme:light] dark:[color-scheme:dark]`
   const kd=(e:React.KeyboardEvent)=>{ if(e.key==='Enter'){e.preventDefault();onSave()} if(e.key==='Escape'){e.preventDefault();onCancel()} }
   const upd=(f:keyof DraftRow,v:string|number|null)=>{ const u:Partial<DraftRow>={[f]:v}; if(f==='completion_date'&&v) u.status='complete'; onUpdate(u) }
   const td=`border-b border-r border-brand-200 dark:border-brand-700 sticky z-10 p-0 ${stickyBg}`
@@ -774,7 +1023,7 @@ function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdat
         </div>
       </td>
       <td className={td} style={{left:colLeft(0),width:COLS[0].w}}>
-        <select className={`${inp} cursor-pointer`} value={draft.tech_item_id??''} onKeyDown={kd} onChange={e=>upd('tech_item_id',Number(e.target.value))}>
+        <select className={sel} value={draft.tech_item_id??''} onKeyDown={kd} onChange={e=>upd('tech_item_id',Number(e.target.value))}>
           <option value="">선택...</option>
           {techItems.map(ti=><option key={ti.id} value={ti.id}>{ti.name}</option>)}
         </select>
@@ -783,22 +1032,26 @@ function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdat
         <input autoFocus className={inp} placeholder="Activity명..." value={draft.name} onKeyDown={kd} onChange={e=>upd('name',e.target.value)}/>
       </td>
       <td className={td} style={{left:colLeft(2),width:COLS[2].w}}>
-        <input type="date" className={inp} value={draft.start_date} onKeyDown={kd} onChange={e=>upd('start_date',e.target.value)}/>
+        <input type="date" className={inp} value={draft.start_date} onKeyDown={kd}
+          max={draft.end_date||undefined}
+          onChange={e=>{ const v=e.target.value; upd('start_date',v); if(draft.end_date&&v>draft.end_date) onUpdate({end_date:v}) }}/>
       </td>
       <td className={td} style={{left:colLeft(3),width:COLS[3].w}}>
-        <input type="date" className={inp} value={draft.end_date} onKeyDown={kd} onChange={e=>upd('end_date',e.target.value)}/>
+        <input type="date" className={inp} value={draft.end_date} onKeyDown={kd}
+          min={draft.start_date||undefined}
+          onChange={e=>{ const v=e.target.value; upd('end_date',v); if(draft.start_date&&v<draft.start_date) onUpdate({start_date:v}) }}/>
       </td>
       <td className={`${td} ${draft.status==='complete'&&!draft.completion_date?'ring-1 ring-inset ring-red-400':''}`} style={{left:colLeft(4),width:COLS[4].w}}>
         <input type="date" className={inp} value={draft.completion_date} onKeyDown={kd} onChange={e=>upd('completion_date',e.target.value)}/>
       </td>
       <td className={td} style={{left:colLeft(5),width:COLS[5].w}}>
-        <select className={`${inp} cursor-pointer`} value={draft.assignee} onKeyDown={kd} onChange={e=>upd('assignee',e.target.value)}>
+        <select className={sel} value={draft.assignee} onKeyDown={kd} onChange={e=>upd('assignee',e.target.value)}>
           <option value="">미지정</option>
           {members.map(m=><option key={m.user_id} value={m.name}>{m.name}</option>)}
         </select>
       </td>
       <td className={td} style={{left:colLeft(6),width:COLS[6].w}}>
-        <select className={`${inp} cursor-pointer`} value={draft.status} onKeyDown={kd} onChange={e=>upd('status',e.target.value)}>
+        <select className={sel} value={draft.status} onKeyDown={kd} onChange={e=>upd('status',e.target.value)}>
           <option value="review">검토</option>
           <option value="in_progress">진행</option>
           <option value="complete">완료</option>
@@ -837,7 +1090,7 @@ function EditTextCell({value,activity,field,editing,draft,setDraft,startEdit,com
   )
 }
 
-function EditDateCell({activity,field,editing,draft,setDraft,startEdit,commitEdit,cancelEdit,style,warnEmpty,previewValue,bgClass}:ECBase) {
+function EditDateCell({activity,field,editing,draft,setDraft,startEdit,commitEdit,cancelEdit,style,warnEmpty,previewValue,bgClass,minDate,maxDate}:ECBase&{minDate?:string;maxDate?:string}) {
   const isE=editing?.id===activity.id&&editing.field===field
   const val=(activity as any)[field] as string|null
   const showVal = previewValue !== undefined ? previewValue : val
@@ -846,7 +1099,7 @@ function EditDateCell({activity,field,editing,draft,setDraft,startEdit,commitEdi
   return (
     <td className={`${sTd} cursor-text text-center ${warnEmpty?'ring-1 ring-inset ring-red-400':''} ${isPreview?'text-brand-600 dark:text-brand-400 font-semibold':''} ${bgClass??'bg-white dark:bg-slate-900'}`}
       style={style} onClick={()=>!isE&&startEdit(activity,field)}>
-      {isE ? <input type="date" autoFocus className="gcell-input text-center" value={draft} onChange={e=>setDraft(e.target.value)} onBlur={()=>commitEdit(activity)} onKeyDown={e=>{if(e.key==='Enter')commitEdit(activity);if(e.key==='Escape')cancelEdit()}}/>
+      {isE ? <input type="date" autoFocus className="gcell-input text-center" value={draft} min={minDate} max={maxDate} onChange={e=>setDraft(e.target.value)} onBlur={()=>commitEdit(activity)} onKeyDown={e=>{if(e.key==='Enter')commitEdit(activity);if(e.key==='Escape')cancelEdit()}}/>
            : <span className="block px-1 leading-9">{display||<span className="text-slate-300 dark:text-slate-600">—</span>}</span>}
     </td>
   )

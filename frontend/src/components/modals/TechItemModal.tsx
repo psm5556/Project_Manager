@@ -18,7 +18,7 @@ export function TechItemModal({ projectId, item, onClose }: Props) {
     onError: () => toast.error('생성 실패'),
   })
   const updateMut = useMutation({
-    mutationFn: () => updateTechItem(item!.id, { name, description: desc, version: item!.version }),
+    mutationFn: () => updateTechItem(item!.id, { name, description: desc, order: item!.order, version: item!.version }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['tech_items', projectId] }); toast.success('저장됨'); onClose() },
     onError: (e: any) => toast.error(e.response?.data?.detail ?? '저장 실패'),
   })

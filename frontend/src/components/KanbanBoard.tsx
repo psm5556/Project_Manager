@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, Calendar, User, AlertCircle } from 'lucide-react'
+import { Plus, Pencil, Trash2, Calendar, User, AlertCircle, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { format, parseISO, isPast } from 'date-fns'
 import toast from 'react-hot-toast'
 import { useApp } from '../contexts/AppContext'
@@ -44,7 +44,7 @@ const COLUMNS: Column[] = [
 ]
 
 export function KanbanBoard() {
-  const { selectedProjectId, selectedTechItemId } = useApp()
+  const { selectedProjectId, selectedTechItemId, sidebarOpen, toggleSidebar } = useApp()
   const qc = useQueryClient()
   const [actModal, setActModal] = useState<{ open: boolean; activity?: Activity }>({ open: false })
   const [dragging, setDragging] = useState<number | null>(null)
@@ -122,6 +122,12 @@ export function KanbanBoard() {
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2.5 bg-white dark:bg-slate-900
         border-b border-slate-200 dark:border-slate-800 flex-shrink-0">
+        <button onClick={toggleSidebar} title={sidebarOpen ? '사이드바 접기' : '사이드바 펼치기'}
+          className="w-7 h-7 flex items-center justify-center rounded-lg flex-shrink-0
+            text-slate-400 hover:text-slate-600 hover:bg-slate-100
+            dark:hover:text-slate-200 dark:hover:bg-slate-800 transition-colors">
+          {sidebarOpen ? <PanelLeftClose size={15}/> : <PanelLeftOpen size={15}/>}
+        </button>
         <span className="text-[13px] font-medium text-slate-600 dark:text-slate-400">
           {activities.length}개 Activity
         </span>

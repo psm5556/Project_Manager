@@ -10,15 +10,28 @@ interface AppContextType {
   setViewMode: (m: ViewMode) => void
   darkMode: boolean
   toggleDarkMode: () => void
+  sidebarOpen: boolean
+  toggleSidebar: () => void
 }
 
 const AppContext = createContext<AppContextType | null>(null)
+
+function readDarkMode(): boolean {
+  try { return localStorage.getItem('pm_darkMode') === 'true' } catch { return false }
+}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
   const [selectedTechItemId, setSelectedTechItemId] = useState<number | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('gantt')
-  const [darkMode, setDarkMode] = useState(false)
+  const [darkMode, setDarkMode] = useState(readDarkMode)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+
+  const toggleDarkMode = () => setDarkMode(p => {
+    const next = !p
+    try { localStorage.setItem('pm_darkMode', String(next)) } catch {}
+    return next
+  })
 
   return (
     <AppContext.Provider
@@ -30,7 +43,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         viewMode,
         setViewMode,
         darkMode,
-        toggleDarkMode: () => setDarkMode(p => !p),
+        toggleDarkMode,
+        sidebarOpen,
+        toggleSidebar: () => setSidebarOpen(p => !p),
       }}
     >
       {children}

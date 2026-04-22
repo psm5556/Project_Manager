@@ -5,6 +5,7 @@ import { format, addWeeks } from 'date-fns'
 import toast from 'react-hot-toast'
 import { createActivity, updateActivity, getTechItems, getMembers } from '../../api'
 import type { Activity } from '../../types'
+import { SmartDateInput } from '../SmartDateInput'
 
 interface Props {
   projectId: number
@@ -130,21 +131,42 @@ export function ActivityModal({ projectId, defaultTechItemId, activity, onClose 
           {/* Dates */}
           <div className="grid grid-cols-2 gap-3">
             <Field label="시작일">
-              <input type="date" className={inputCls} value={startDate}
-                onChange={e => setStartDate(e.target.value)} />
+              <SmartDateInput
+                className={`${inputCls} flex`}
+                inputCls="text-[13px] text-slate-900 dark:text-slate-100"
+                iconSize={14}
+                value={startDate}
+                maxDate={endDate || undefined}
+                onChange={v => {
+                  setStartDate(v)
+                  if (endDate && v && v > endDate) setEndDate(v)
+                }}
+              />
             </Field>
             <Field label="종료일">
-              <input type="date" className={inputCls} value={endDate}
-                onChange={e => setEndDate(e.target.value)} />
+              <SmartDateInput
+                className={`${inputCls} flex`}
+                inputCls="text-[13px] text-slate-900 dark:text-slate-100"
+                iconSize={14}
+                value={endDate}
+                minDate={startDate || undefined}
+                onChange={v => {
+                  setEndDate(v)
+                  if (startDate && v && v < startDate) setStartDate(v)
+                }}
+              />
             </Field>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="완료일" warn={completionMissing} warnMsg="완료 상태이나 완료일 없음">
-              <input type="date"
-                className={`${inputCls} ${completionMissing ? 'ring-2 ring-red-400 border-red-300' : ''}`}
+              <SmartDateInput
+                className={`${inputCls} flex ${completionMissing ? 'ring-2 ring-red-400 border-red-300' : ''}`}
+                inputCls="text-[13px] text-slate-900 dark:text-slate-100"
+                iconSize={14}
                 value={completionDate}
-                onChange={e => setCompletionDate(e.target.value)} />
+                onChange={v => setCompletionDate(v)}
+              />
             </Field>
             <Field label="담당자">
               <select className={selectCls} value={assignee} onChange={e => setAssignee(e.target.value)}>

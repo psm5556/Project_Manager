@@ -9,6 +9,7 @@ interface AuthContextType {
   login: (knox_id: string, pin: string) => Promise<void>
   register: (name: string, knox_id: string, pin: string) => Promise<void>
   logout: () => void
+  updateUser: (u: User) => void
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -54,8 +55,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
   }
 
+  const updateUser = (u: User) => setUser(u)
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   )

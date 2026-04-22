@@ -40,6 +40,16 @@ class TokenResponse(BaseModel):
     user: UserResponse
 
 
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    knox_id: Optional[str] = None
+
+
+class ResetOwnPin(BaseModel):
+    current_pin: str
+    new_pin: str
+
+
 # ─── Projects ─────────────────────────────────────────────────────────────────
 
 class ProjectCreate(BaseModel):
@@ -78,8 +88,13 @@ class TechItemCreate(BaseModel):
 class TechItemUpdate(BaseModel):
     name: str
     description: Optional[str] = ""
-    order: Optional[int] = 0
+    order: Optional[int] = None  # None = preserve existing order
     version: int
+
+
+class TechItemReorderItem(BaseModel):
+    id: int
+    order: int
 
 
 class TechItemResponse(BaseModel):

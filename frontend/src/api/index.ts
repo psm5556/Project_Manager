@@ -33,6 +33,12 @@ export const loginUser = (data: { knox_id: string; pin: string }) =>
 export const getMe = () =>
   api.get<User>('/auth/me').then(r => r.data)
 
+export const updateProfile = (data: { name?: string; knox_id?: string }) =>
+  api.patch<User>('/auth/me', data).then(r => r.data)
+
+export const resetOwnPin = (data: { current_pin: string; new_pin: string }) =>
+  api.post('/auth/me/reset-pin', data).then(r => r.data)
+
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export const searchUsers = (q: string) =>
@@ -95,9 +101,11 @@ export const getTechItems = (projectId: number) =>
   api.get<TechItem[]>(`/projects/${projectId}/tech_items`).then(r => r.data)
 export const createTechItem = (data: { project_id: number; name: string; description?: string }) =>
   api.post<TechItem>('/tech_items', data).then(r => r.data)
-export const updateTechItem = (id: number, data: { name: string; description?: string; version: number }) =>
+export const updateTechItem = (id: number, data: { name: string; description?: string; order?: number; version: number }) =>
   api.put<TechItem>(`/tech_items/${id}`, data).then(r => r.data)
 export const deleteTechItem = (id: number) => api.delete(`/tech_items/${id}`)
+export const reorderTechItems = (projectId: number, items: { id: number; order: number }[]) =>
+  api.patch(`/projects/${projectId}/tech_items/reorder`, items).then(r => r.data)
 
 // ─── Activities ───────────────────────────────────────────────────────────────
 
