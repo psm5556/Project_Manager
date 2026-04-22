@@ -99,7 +99,7 @@ export const deleteBackup = (projectId: number, backupId: number) =>
 
 export const getTechItems = (projectId: number) =>
   api.get<TechItem[]>(`/projects/${projectId}/tech_items`).then(r => r.data)
-export const createTechItem = (data: { project_id: number; name: string; description?: string }) =>
+export const createTechItem = (data: { project_id: number; name: string; description?: string; order?: number }) =>
   api.post<TechItem>('/tech_items', data).then(r => r.data)
 export const updateTechItem = (id: number, data: { name: string; description?: string; order?: number; version: number }) =>
   api.put<TechItem>(`/tech_items/${id}`, data).then(r => r.data)

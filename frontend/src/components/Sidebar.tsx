@@ -301,7 +301,7 @@ function ProjectNode({
                 <span className="flex-1 truncate">{ti.name}</span>
                 <span className="hidden group-hover:flex items-center gap-0.5 flex-shrink-0">
                   {isMaster && <ActionBtn title="편집" onClick={e => { e.stopPropagation(); onEditTI(ti) }}><Pencil size={11} /></ActionBtn>}
-                  {isMaster && <ActionBtn title="삭제" onClick={e => handleDelTI(ti, e)} danger><Trash2 size={11} /></ActionBtn>}
+                  {isMember && <ActionBtn title="삭제" onClick={e => handleDelTI(ti, e)} danger><Trash2 size={11} /></ActionBtn>}
                 </span>
               </div>
             )

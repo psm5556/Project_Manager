@@ -628,8 +628,10 @@ export function GanttChart() {
     const FIELDS = ['tech_item_id','name','start_date','end_date','completion_date','assignee','status','notes'] as const
     type F = typeof FIELDS[number]
 
-    // Tech Item: 존재하면 ID 반환, 없으면 자동 생성
+    // Tech Item: 존재하면 ID 반환, 없으면 순서를 유지하며 자동 생성
     const tiCache = new Map<string, number>(techItems.map(t=>[t.name.toLowerCase(),t.id]))
+    const maxExistingOrder = techItems.length ? Math.max(...techItems.map(t=>t.order)) : -1
+    let nextOrder = maxExistingOrder + 1
     let newTiCount = 0
     const getOrCreateTiId = async (v: string): Promise<number|null> => {
       if (!v.trim()) return null
@@ -637,7 +639,7 @@ export function GanttChart() {
       if (tiCache.has(key)) return tiCache.get(key)!
       if (!selectedProjectId) return null
       try {
-        const ti = await createTechItem({ project_id: selectedProjectId, name: v.trim() })
+        const ti = await createTechItem({ project_id: selectedProjectId, name: v.trim(), order: nextOrder++ })
         tiCache.set(key, ti.id)
         newTiCount++
         return ti.id
