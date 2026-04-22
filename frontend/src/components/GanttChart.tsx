@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 import { useApp } from '../contexts/AppContext'
 import {
   getProjectActivities, getTechItemActivities, getTechItems,
-  createActivity, updateActivity, deleteActivity, getMembers,
+  createActivity, updateActivity, deleteActivity, getMembers, createTechItem,
 } from '../api'
 import { ActivityModal } from './modals/ActivityModal'
 import type { Activity, TechItem, Member } from '../types'
@@ -628,7 +628,22 @@ export function GanttChart() {
     const FIELDS = ['tech_item_id','name','start_date','end_date','completion_date','assignee','status','notes'] as const
     type F = typeof FIELDS[number]
 
-    const parseTiId = (v:string) => techItems.find(t=>t.name.toLowerCase()===v.toLowerCase().trim())?.id ?? null
+    // Tech Item: 존재하면 ID 반환, 없으면 자동 생성
+    const tiCache = new Map<string, number>(techItems.map(t=>[t.name.toLowerCase(),t.id]))
+    let newTiCount = 0
+    const getOrCreateTiId = async (v: string): Promise<number|null> => {
+      if (!v.trim()) return null
+      const key = v.trim().toLowerCase()
+      if (tiCache.has(key)) return tiCache.get(key)!
+      if (!selectedProjectId) return null
+      try {
+        const ti = await createTechItem({ project_id: selectedProjectId, name: v.trim() })
+        tiCache.set(key, ti.id)
+        newTiCount++
+        return ti.id
+      } catch { return null }
+    }
+
     const parseDate = (v:string): string|null => {
       if (!v.trim()) return null
       const s = v.trim()
@@ -659,7 +674,7 @@ export function GanttChart() {
         if (fi >= FIELDS.length) break
         const field = FIELDS[fi]
         const raw = cols[ci].trim()
-        if (field==='tech_item_id')  { const id=parseTiId(raw); if(id!==null) values.tech_item_id=id }
+        if (field==='tech_item_id')  { const id=await getOrCreateTiId(raw); if(id!==null) values.tech_item_id=id }
         else if (field==='start_date'||field==='end_date'||field==='completion_date') values[field]=parseDate(raw)
         else if (field==='status')   { if(raw) values.status=parseStatus(raw) }
         else                         { values[field as 'name'|'assignee'|'notes'] = raw||undefined }
@@ -693,9 +708,16 @@ export function GanttChart() {
     }
 
     invalidate()
-    const parts=[updated&&`${updated}개 수정`,created&&`${created}개 생성`,failed&&`${failed}개 실패`].filter(Boolean)
+    if (newTiCount > 0 && selectedProjectId)
+      qc.invalidateQueries({ queryKey: ['tech_items', selectedProjectId] })
+    const parts=[
+      newTiCount&&`Tech Item ${newTiCount}개 생성`,
+      updated&&`Activity ${updated}개 수정`,
+      created&&`Activity ${created}개 생성`,
+      failed&&`${failed}개 실패`,
+    ].filter(Boolean)
     if (parts.length) toast[failed?'error':'success'](parts.join(', '))
-  }, [pasteAnchor, sorted, techItems, invalidate])
+  }, [pasteAnchor, sorted, techItems, selectedProjectId, invalidate, qc])
 
   // ── Empty / loading ───────────────────────────────────────────
   if(!selectedProjectId&&!selectedTechItemId) return (
