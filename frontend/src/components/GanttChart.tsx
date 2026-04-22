@@ -795,7 +795,7 @@ export function GanttChart() {
             <span className="ml-1.5 px-1.5 py-0.5 bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 rounded text-[11px]">+{draftRows.length} 작성중</span>
           )}
         </span>
-        <span className="text-[11px] text-slate-400 hidden md:block">· 바 드래그: 날짜 조정 &nbsp;· 행 클릭 후 Ctrl+V: 붙여넣기</span>
+        <span className="text-[11px] text-slate-400 hidden md:block">· 붙여넣기 할 행의 Tech Item을 클릭 후 Ctrl+V &nbsp;· 날짜 조정은 바 드래그</span>
         <div className="ml-auto flex items-center gap-2">
           {/* 주/월 토글 */}
           <div className="flex rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden text-[12px]">
