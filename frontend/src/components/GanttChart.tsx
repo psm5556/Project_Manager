@@ -5,7 +5,7 @@ import {
   parseISO, isWithinInterval, addDays, format, getMonth, getYear,
   startOfMonth, endOfMonth, addMonths,
 } from 'date-fns'
-import { Trash2, Plus, Pencil, Check, X as XIcon, AlertTriangle, PanelLeftClose, PanelLeftOpen, FileSpreadsheet } from 'lucide-react'
+import { Trash2, Plus, Pencil, Check, X as XIcon, AlertTriangle, PanelLeftClose, PanelLeftOpen, FileSpreadsheet, ChevronRight, ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useApp } from '../contexts/AppContext'
 import {
@@ -285,6 +285,16 @@ export function GanttChart() {
   const tiMap      = useMemo(()=>Object.fromEntries(techItems.map(t=>[t.id,t.name])),[techItems])
   const tiOrderMap = useMemo(()=>Object.fromEntries(techItems.map(t=>[t.id,t.order])),[techItems])
 
+  // ── Collapsible Tech Item groups ──────────────────────────────
+  const [collapsedTIs, setCollapsedTIs] = useState<Set<number>>(new Set())
+  const toggleTI = useCallback((id: number) => {
+    setCollapsedTIs(prev => { const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n })
+  }, [])
+  const allCollapsed = techItems.length > 0 && techItems.every(t => collapsedTIs.has(t.id))
+  const toggleAllTIs = useCallback(() => {
+    setCollapsedTIs(allCollapsed ? new Set() : new Set(techItems.map(t => t.id)))
+  }, [allCollapsed, techItems])
+
   const sorted = useMemo(()=>[...activities].sort((a,b)=>{
     const oa=tiOrderMap[a.tech_item_id]??999, ob=tiOrderMap[b.tech_item_id]??999
     if(oa!==ob) return oa-ob
@@ -295,6 +305,32 @@ export function GanttChart() {
   }),[activities,tiOrderMap])
 
   activitiesRef.current = sorted
+
+  // ── Per-TechItem stats ────────────────────────────────────────
+  const tiStats = useMemo(()=>{
+    const s: Record<number,{review:number;in_progress:number;complete:number;total:number;rate:number}> = {}
+    for (const a of sorted) {
+      if (!s[a.tech_item_id]) s[a.tech_item_id]={review:0,in_progress:0,complete:0,total:0,rate:0}
+      s[a.tech_item_id].total++
+      if (a.status==='review') s[a.tech_item_id].review++
+      else if (a.status==='in_progress') s[a.tech_item_id].in_progress++
+      else if (a.status==='complete') s[a.tech_item_id].complete++
+    }
+    for (const id in s) { const st=s[Number(id)]; st.rate=st.total>0?Math.round(st.complete/st.total*100):0 }
+    return s
+  }, [sorted])
+
+  // ── Per-TechItem date range (for collapsed summary bar) ───────
+  const tiDateRange = useMemo(()=>{
+    const r: Record<number,{start:string|null;end:string|null}> = {}
+    for (const a of sorted) {
+      if (!r[a.tech_item_id]) r[a.tech_item_id]={start:null,end:null}
+      const rr=r[a.tech_item_id]
+      if (a.start_date&&(!rr.start||a.start_date<rr.start)) rr.start=a.start_date
+      if (a.end_date&&(!rr.end||a.end_date>rr.end)) rr.end=a.end_date
+    }
+    return r
+  }, [sorted])
 
   const invalidate = useCallback(()=>{
     if(selectedProjectId)  qc.invalidateQueries({queryKey:['activities','project',selectedProjectId]})
@@ -798,6 +834,15 @@ export function GanttChart() {
         </span>
         <span className="text-[11px] text-slate-400 hidden md:block">· 붙여넣기 할 행의 Tech Item을 클릭 후 Ctrl+V &nbsp;· 날짜 조정은 바 드래그</span>
         <div className="ml-auto flex items-center gap-2">
+          {/* 전체 접기/펼치기 */}
+          {techItems.length > 0 && (
+            <button onClick={toggleAllTIs}
+              title={allCollapsed ? '전체 펼치기' : '전체 접기'}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[12px] border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+              {allCollapsed ? <ChevronsUpDown size={13}/> : <ChevronsDownUp size={13}/>}
+              {allCollapsed ? '펼치기' : '접기'}
+            </button>
+          )}
           {/* 주/월 토글 */}
           <div className="flex rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden text-[12px]">
             <button onClick={()=>setViewUnit('week')}
@@ -907,27 +952,58 @@ export function GanttChart() {
 
             {sorted.flatMap((a,idx)=>{
               const isGroupStart = idx===0 || sorted[idx-1].tech_item_id !== a.tech_item_id
+              const isCollapsed  = collapsedTIs.has(a.tech_item_id)
               const rowBg=idx%2===0?'':'bg-slate-50/60 dark:bg-slate-800/30'
               const stickyBg=idx%2===0?'bg-white dark:bg-slate-900':'bg-slate-50 dark:bg-slate-800'
               const completionMissing=a.status==='complete'&&!a.completion_date
               const isDraggingThis=dragging?.activityId===a.id
               const pa=previewAct(a) // preview dates during drag
 
-              const groupHeader = isGroupStart ? (
-                <tr key={`group-${a.tech_item_id}-${idx}`} style={{height:26}}>
-                  <td colSpan={1+COLS.length}
-                    className="sticky left-0 z-10 px-3 border-b border-t-2 border-t-slate-300 dark:border-t-slate-500 border-b-slate-200 dark:border-b-slate-700 bg-slate-100 dark:bg-slate-800/80 whitespace-nowrap"
-                    style={{left:0}}>
-                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
-                      {tiMap[a.tech_item_id]??'—'}
-                    </span>
-                  </td>
-                  {(viewUnit==='week'?weeks:months).map((_,pi)=>(
-                    <td key={pi} className="border-b border-t-2 border-t-slate-300 dark:border-t-slate-500 border-b-slate-200 dark:border-b-slate-700 bg-slate-100 dark:bg-slate-800/80"
-                      style={{width:viewUnit==='week'?WEEK_W:MONTH_W}}/>
-                  ))}
-                </tr>
-              ) : null
+              const groupHeader = isGroupStart ? (()=>{
+                const stats  = tiStats[a.tech_item_id]  ?? {review:0,in_progress:0,complete:0,total:0,rate:0}
+                const range  = tiDateRange[a.tech_item_id] ?? {start:null,end:null}
+                const hdrCls = 'border-b border-t-2 border-t-slate-300 dark:border-t-slate-500 border-b-slate-200 dark:border-b-slate-700 bg-slate-100 dark:bg-slate-800/80'
+                return (
+                  <tr key={`group-${a.tech_item_id}-${idx}`} style={{height:30}}>
+                    <td colSpan={1+COLS.length}
+                      className={`sticky left-0 z-10 px-2 ${hdrCls} whitespace-nowrap cursor-pointer select-none`}
+                      style={{left:0}}
+                      onClick={()=>toggleTI(a.tech_item_id)}>
+                      <div className="flex items-center gap-1.5">
+                        <ChevronRight size={13} className={`flex-shrink-0 text-slate-400 transition-transform duration-150 ${isCollapsed?'':'rotate-90'}`}/>
+                        <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">{tiMap[a.tech_item_id]??'—'}</span>
+                        <div className="flex items-center gap-1 ml-2">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-medium">검토 {stats.review}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-medium">진행 {stats.in_progress}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 font-medium">완료 {stats.complete}</span>
+                          <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">({stats.rate}%)</span>
+                        </div>
+                      </div>
+                    </td>
+                    {(viewUnit==='week'?weeks:months).map((wm,pi)=>{
+                      const unitW = viewUnit==='week'?WEEK_W:MONTH_W
+                      if (!isCollapsed) return <td key={pi} className={hdrCls} style={{width:unitW}}/>
+                      // collapsed: draw aggregate bar
+                      const wStart = viewUnit==='week'?format(weeks[pi].monday,'yyyy-MM-dd'):format(months[pi].firstDay,'yyyy-MM-dd')
+                      const wEnd   = viewUnit==='week'?format(addDays(weeks[pi].monday,6),'yyyy-MM-dd'):format(months[pi].lastDay,'yyyy-MM-dd')
+                      const inRange = range.start&&range.end ? range.start<=wEnd&&range.end>=wStart : false
+                      const isBarStart = inRange&&range.start ? range.start>=wStart&&range.start<=wEnd : false
+                      const isBarEnd   = inRange&&range.end   ? range.end>=wStart&&range.end<=wEnd   : false
+                      return (
+                        <td key={pi} className={`${hdrCls} relative`} style={{width:unitW}}>
+                          {inRange&&(
+                            <div className="absolute left-0 right-0 mx-px"
+                              style={{top:'22%',bottom:'22%',
+                                background:'linear-gradient(135deg,#64748b,#94a3b8)',
+                                borderRadius:isBarStart&&isBarEnd?4:isBarStart?'4px 0 0 4px':isBarEnd?'0 4px 4px 0':0,
+                                marginLeft:isBarStart?2:0,marginRight:isBarEnd?2:0}}/>
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })() : null
 
               const isAnchor = pasteAnchor?.actId===a.id
               const actRow = (
@@ -1097,6 +1173,9 @@ export function GanttChart() {
                   }
                 </tr>
               )
+              // collapsed: only show the group header, hide activity rows
+              if (isCollapsed) return [groupHeader].filter(Boolean)
+
               // draft rows inserted right after this activity
               const inlineDrafts = draftRows
                 .filter(d=>d.insertAfter===a.id)
