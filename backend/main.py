@@ -312,6 +312,15 @@ async def create_project(
     # Add creator as master
     member = models.ProjectMember(project_id=obj.id, user_id=current_user.id, role="master")
     db.add(member)
+    # Create default Tech Item and Activity
+    tech_item = models.TechItem(project_id=obj.id, name="Tech 1", description="", order=0)
+    db.add(tech_item)
+    db.flush()
+    activity = models.Activity(
+        tech_item_id=tech_item.id, name="Activity 1",
+        status="review", notes="", assignee="", order=0,
+    )
+    db.add(activity)
     db.commit()
     db.refresh(obj)
     await manager.broadcast({"type": "project_created", "data": {"id": obj.id}})

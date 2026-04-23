@@ -13,6 +13,7 @@ import {
   createActivity, updateActivity, deleteActivity, getMembers, createTechItem, reorderTechItems,
 } from '../api'
 import { ActivityModal } from './modals/ActivityModal'
+import { SmartDateInput } from './SmartDateInput'
 import type { Activity, TechItem, Member } from '../types'
 
 // ── Column definitions ────────────────────────────────────────────────────────
@@ -1170,17 +1171,31 @@ function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdat
         <input autoFocus className={inp} placeholder="Activity명..." value={draft.name} onKeyDown={kd} onChange={e=>upd('name',e.target.value)}/>
       </td>
       <td className={td} style={{left:colLeft(2),width:COLS[2].w}}>
-        <input type="date" className={inp} value={draft.start_date} onKeyDown={kd}
-          max={draft.end_date||undefined}
-          onChange={e=>{ const v=e.target.value; upd('start_date',v); if(draft.end_date&&v>draft.end_date) onUpdate({end_date:v}) }}/>
+        <div className="w-full h-full flex items-center px-1" onKeyDown={kd}>
+          <SmartDateInput value={draft.start_date} maxDate={draft.end_date||undefined}
+            onChange={v=>{ upd('start_date',v); if(draft.end_date&&v&&v>draft.end_date) onUpdate({end_date:v}) }}
+            className="flex items-center w-full"
+            inputCls="text-[11px] text-slate-700 dark:text-slate-300 bg-transparent"
+            iconSize={10}/>
+        </div>
       </td>
       <td className={td} style={{left:colLeft(3),width:COLS[3].w}}>
-        <input type="date" className={inp} value={draft.end_date} onKeyDown={kd}
-          min={draft.start_date||undefined}
-          onChange={e=>{ const v=e.target.value; upd('end_date',v); if(draft.start_date&&v<draft.start_date) onUpdate({start_date:v}) }}/>
+        <div className="w-full h-full flex items-center px-1" onKeyDown={kd}>
+          <SmartDateInput value={draft.end_date} minDate={draft.start_date||undefined}
+            onChange={v=>{ upd('end_date',v); if(draft.start_date&&v&&v<draft.start_date) onUpdate({start_date:v}) }}
+            className="flex items-center w-full"
+            inputCls="text-[11px] text-slate-700 dark:text-slate-300 bg-transparent"
+            iconSize={10}/>
+        </div>
       </td>
       <td className={`${td} ${draft.status==='complete'&&!draft.completion_date?'ring-1 ring-inset ring-red-400':''}`} style={{left:colLeft(4),width:COLS[4].w}}>
-        <input type="date" className={inp} value={draft.completion_date} onKeyDown={kd} onChange={e=>upd('completion_date',e.target.value)}/>
+        <div className="w-full h-full flex items-center px-1" onKeyDown={kd}>
+          <SmartDateInput value={draft.completion_date} minDate={draft.end_date||draft.start_date||undefined}
+            onChange={v=>upd('completion_date',v)}
+            className="flex items-center w-full"
+            inputCls="text-[11px] text-slate-700 dark:text-slate-300 bg-transparent"
+            iconSize={10}/>
+        </div>
       </td>
       <td className={td} style={{left:colLeft(5),width:COLS[5].w}}>
         <select className={sel} value={draft.assignee} onKeyDown={kd} onChange={e=>upd('assignee',e.target.value)}>
@@ -1237,8 +1252,20 @@ function EditDateCell({activity,field,editing,draft,setDraft,startEdit,commitEdi
   return (
     <td className={`${sTd} cursor-text text-center ${warnEmpty?'ring-1 ring-inset ring-red-400':''} ${isPreview?'text-brand-600 dark:text-brand-400 font-semibold':''} ${bgClass??'bg-white dark:bg-slate-900'}`}
       style={style} onClick={()=>!isE&&startEdit(activity,field)}>
-      {isE ? <input type="date" autoFocus className="gcell-input text-center" value={draft} min={minDate} max={maxDate} onChange={e=>setDraft(e.target.value)} onBlur={()=>commitEdit(activity)} onKeyDown={e=>{if(e.key==='Enter')commitEdit(activity);if(e.key==='Escape')cancelEdit()}}/>
-           : <span className="block px-1 leading-9">{display||<span className="text-slate-300 dark:text-slate-600">—</span>}</span>}
+      {isE
+        ? <div
+            className="w-full h-full flex items-center px-1"
+            onBlur={e=>{ if(!e.currentTarget.contains(e.relatedTarget as Node)) commitEdit(activity) }}
+            onKeyDown={e=>{ if(e.key==='Enter') commitEdit(activity); if(e.key==='Escape') cancelEdit() }}
+          >
+            <SmartDateInput
+              autoFocus value={draft} minDate={minDate} maxDate={maxDate} onChange={setDraft}
+              className="flex items-center w-full"
+              inputCls="text-[11px] text-slate-700 dark:text-slate-300 bg-transparent"
+              iconSize={10}
+            />
+          </div>
+        : <span className="block px-1 leading-9">{display||<span className="text-slate-300 dark:text-slate-600">—</span>}</span>}
     </td>
   )
 }

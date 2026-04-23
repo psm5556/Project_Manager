@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { X, FolderOpen } from 'lucide-react'
+import { X, FolderOpen, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { createProject, updateProject } from '../../api'
 import type { Project } from '../../types'
@@ -54,6 +54,14 @@ export function ProjectModal({ project, onClose }: Props) {
         </div>
 
         <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
+          {!project && (
+            <div className="flex items-start gap-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 px-3 py-2.5">
+              <Info size={13} className="text-blue-500 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+              <p className="text-[11px] text-blue-600 dark:text-blue-400 leading-relaxed">
+                생성 시 기본 Tech Item <strong>"Tech 1"</strong>과 Activity <strong>"Activity 1"</strong>이 자동으로 추가됩니다.
+              </p>
+            </div>
+          )}
           <div>
             <label className="block text-[12px] font-medium text-slate-600 dark:text-slate-400 mb-1.5">
               프로젝트명 <span className="text-red-500">*</span>
