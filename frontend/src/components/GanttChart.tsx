@@ -5,7 +5,7 @@ import {
   parseISO, isWithinInterval, addDays, format, getMonth, getYear,
   startOfMonth, endOfMonth, addMonths,
 } from 'date-fns'
-import { Trash2, Plus, Pencil, Check, X as XIcon, AlertTriangle, PanelLeftClose, PanelLeftOpen, FileSpreadsheet, ChevronRight, ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
+import { Trash2, Plus, Pencil, Check, X as XIcon, AlertTriangle, PanelLeftClose, PanelLeftOpen, FileSpreadsheet, ChevronRight, ChevronsDownUp, ChevronsUpDown, ChevronsLeftRight, ChevronsRightLeft } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useApp } from '../contexts/AppContext'
 import {
@@ -18,23 +18,26 @@ import type { Activity, TechItem, Member } from '../types'
 
 // ── Column definitions ────────────────────────────────────────────────────────
 const COLS = [
-  { key: 'tech_item_id',    label: 'Tech Item', w: 112 },
-  { key: 'name',            label: 'Activity',  w: 150 },
-  { key: 'start_date',      label: '시작일',    w: 88  },
-  { key: 'end_date',        label: '종료일',    w: 88  },
-  { key: 'completion_date', label: '완료일',    w: 88  },
-  { key: 'assignee',        label: '담당자',    w: 84  },
-  { key: 'status',          label: '상태',      w: 74  },
-  { key: 'notes',           label: '메모',      w: 120 },
-] as const
+  { key: 'tech_item_id',    label: 'Tech Item', w: 112, minW: 40 },
+  { key: 'name',            label: 'Activity',  w: 150, minW: 40 },
+  { key: 'start_date',      label: '시작일',    w: 88,  minW: 40 },
+  { key: 'end_date',        label: '종료일',    w: 88,  minW: 40 },
+  { key: 'completion_date', label: '완료일',    w: 88,  minW: 40 },
+  { key: 'assignee',        label: '담당자',    w: 84,  minW: 40 },
+  { key: 'status',          label: '상태',      w: 74,  minW: 40 },
+  { key: 'notes',           label: '메모',      w: 120, minW: 40 },
+]
+type ColKey = typeof COLS[number]['key']
 
-const ACTION_W = 76
-const WEEK_W   = 32
-const MONTH_W  = 60
+const ACTION_W    = 76
+const WEEK_W      = 32
+const MONTH_W     = 60
+const COLLAPSED_W = 22   // width of a collapsed column
 
-function colLeft(i: number) {
+// Compute left offset from resolved widths array
+function computeColLeft(i: number, cw: number[]) {
   let l = ACTION_W
-  for (let j = 0; j < i; j++) l += COLS[j].w
+  for (let j = 0; j < i; j++) l += cw[j]
   return l
 }
 
@@ -249,6 +252,44 @@ export function GanttChart() {
   const savingRef    = useRef<Set<string>>(new Set())
   const fixedRef     = useRef<Set<number>>(new Set())
   const viewUnitRef  = useRef<'week'|'month'>('week')
+
+  // ── Column resize / collapse ──────────────────────────────────
+  const [colWidths,    setColWidths]    = useState<Record<ColKey,number>>(
+    ()=>Object.fromEntries(COLS.map(c=>[c.key,c.w])) as Record<ColKey,number>
+  )
+  const [collapsedCols, setCollapsedCols] = useState<Set<ColKey>>(new Set())
+  const resizingRef = useRef<{key:ColKey;startX:number;startW:number}|null>(null)
+
+  // Resolved width / left for each column index
+  const cw = useMemo(()=>COLS.map(c=>collapsedCols.has(c.key as ColKey)?COLLAPSED_W:(colWidths[c.key as ColKey]??c.w)),
+    [colWidths,collapsedCols])
+  const cl = useMemo(()=>cw.map((_,i)=>computeColLeft(i,cw)),[cw])
+
+  const startResizing = useCallback((key:ColKey, clientX:number)=>{
+    resizingRef.current={key,startX:clientX,startW:colWidths[key]??COLS.find(c=>c.key===key)!.w}
+  },[colWidths])
+
+  const resetColWidth = useCallback((key:ColKey)=>{
+    setColWidths(p=>({...p,[key]:COLS.find(c=>c.key===key)!.w}))
+  },[])
+
+  const allColsCollapsed = COLS.every(c => collapsedCols.has(c.key as ColKey))
+  const toggleAllCols = useCallback(()=>{
+    setCollapsedCols(p=>p.size===COLS.length?new Set():new Set(COLS.map(c=>c.key as ColKey)))
+  },[])
+
+  useEffect(()=>{
+    const onMove=(e:MouseEvent)=>{
+      if(!resizingRef.current) return
+      const {key,startX,startW}=resizingRef.current
+      const minW=COLS.find(c=>c.key===key)?.minW??40
+      setColWidths(p=>({...p,[key]:Math.max(minW,startW+(e.clientX-startX))}))
+    }
+    const onUp=()=>{ resizingRef.current=null }
+    window.addEventListener('mousemove',onMove)
+    window.addEventListener('mouseup',onUp)
+    return ()=>{ window.removeEventListener('mousemove',onMove); window.removeEventListener('mouseup',onUp) }
+  },[])
 
   // ── Drag state (ref for stable closure + state for re-render) ──
   const [dragging,    setDraggingState] = useState<DragState|null>(null)
@@ -834,13 +875,20 @@ export function GanttChart() {
         </span>
         <span className="text-[11px] text-slate-400 hidden md:block">· 붙여넣기 할 행의 Tech Item을 클릭 후 Ctrl+V &nbsp;· 날짜 조정은 바 드래그</span>
         <div className="ml-auto flex items-center gap-2">
-          {/* 전체 접기/펼치기 */}
+          {/* 칼럼 접기/펼치기 */}
+          <button onClick={toggleAllCols}
+            title={allColsCollapsed ? '칼럼 펼치기' : '칼럼 접기'}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[12px] border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+            {allColsCollapsed ? <ChevronsLeftRight size={13}/> : <ChevronsRightLeft size={13}/>}
+            {allColsCollapsed ? '칼럼 펼치기' : '칼럼 접기'}
+          </button>
+          {/* 행 전체 접기/펼치기 */}
           {techItems.length > 0 && (
             <button onClick={toggleAllTIs}
               title={allCollapsed ? '전체 펼치기' : '전체 접기'}
               className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-[12px] border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
               {allCollapsed ? <ChevronsUpDown size={13}/> : <ChevronsDownUp size={13}/>}
-              {allCollapsed ? '펼치기' : '접기'}
+              {allCollapsed ? '행 펼치기' : '행 접기'}
             </button>
           )}
           {/* 주/월 토글 */}
@@ -875,13 +923,13 @@ export function GanttChart() {
         {(() => {
           const colCount = viewUnit==='week' ? weeks.length : months.length
           const unitW    = viewUnit==='week' ? WEEK_W : MONTH_W
-          const minW     = ACTION_W + COLS.reduce((s,c)=>s+c.w,0) + colCount*unitW
+          const minW     = ACTION_W + cw.reduce((s,w)=>s+w,0) + colCount*unitW
           const rowSpan  = viewUnit==='week' ? 3 : 2
           return (
         <table style={{tableLayout:'fixed',borderCollapse:'separate',borderSpacing:0,minWidth:minW,width:minW}}>
           <colgroup>
             <col style={{width:ACTION_W}}/>
-            {COLS.map(c=><col key={c.key} style={{width:c.w}}/>)}
+            {COLS.map((c,i)=><col key={c.key} style={{width:cw[i]}}/>)}
             {viewUnit==='week'
               ? weeks.map(w=><col key={`${w.year}-${w.week}`} style={{width:WEEK_W}}/>)
               : months.map(m=><col key={`${m.year}-${m.month}`} style={{width:MONTH_W}}/>)
@@ -899,8 +947,18 @@ export function GanttChart() {
                 </button>
               </th>
               {COLS.map((c,i)=>(
-                <th key={c.key} rowSpan={rowSpan} className={`${thBase} sticky z-30 px-2`}
-                  style={{left:colLeft(i),width:c.w,top:TOP_YEAR}}>{c.label}</th>
+                <th key={c.key} rowSpan={rowSpan}
+                  className={`${thBase} sticky z-30 p-0 relative overflow-hidden`}
+                  style={{left:cl[i],width:cw[i],top:TOP_YEAR}}>
+                  <span className="block px-2 py-1 truncate whitespace-nowrap">{c.label}</span>
+                  {/* Resize handle */}
+                  <div
+                    className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize z-10
+                      hover:bg-brand-400/40 active:bg-brand-500/40 transition-colors"
+                    onMouseDown={e=>{ e.preventDefault(); startResizing(c.key as ColKey, e.clientX) }}
+                    onDoubleClick={()=>resetColWidth(c.key as ColKey)}
+                  />
+                </th>
               ))}
               {/* Year groups */}
               {viewUnit==='week'
@@ -1040,40 +1098,40 @@ export function GanttChart() {
                   <EditSelectCell activity={a} techItems={techItems} tiMap={tiMap}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} saveField={saveField} cancelEdit={cancelEdit}
-                    style={{left:colLeft(0),width:COLS[0].w}} bgClass={stickyBg}/>
+                    style={{left:cl[0],width:cw[0]}} bgClass={stickyBg}/>
                   <EditTextCell value={a.name} field="name" activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
-                    style={{left:colLeft(1),width:COLS[1].w}} sticky bgClass={stickyBg}
+                    style={{left:cl[1],width:cw[1]}} sticky bgClass={stickyBg}
                     delayed={isDelayed(a)}/>
                   <EditDateCell field="start_date" activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
-                    style={{left:colLeft(2),width:COLS[2].w}} sticky bgClass={stickyBg}
+                    style={{left:cl[2],width:cw[2]}} sticky bgClass={stickyBg}
                     maxDate={a.end_date??undefined}
                     previewValue={isDraggingThis&&dragging.type!=='end'?pa.start_date:undefined}/>
                   <EditDateCell field="end_date" activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
-                    style={{left:colLeft(3),width:COLS[3].w}} sticky bgClass={stickyBg}
+                    style={{left:cl[3],width:cw[3]}} sticky bgClass={stickyBg}
                     minDate={a.start_date??undefined}
                     previewValue={isDraggingThis&&dragging.type!=='start'?pa.end_date:undefined}/>
                   <EditDateCell field="completion_date" activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
-                    style={{left:colLeft(4),width:COLS[4].w}} sticky warnEmpty={completionMissing} bgClass={stickyBg}/>
+                    style={{left:cl[4],width:cw[4]}} sticky warnEmpty={completionMissing} bgClass={stickyBg}/>
                   <EditAssigneeCell activity={a} members={members}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
-                    style={{left:colLeft(5),width:COLS[5].w}} bgClass={stickyBg}/>
+                    style={{left:cl[5],width:cw[5]}} bgClass={stickyBg}/>
                   <EditStatusCell activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
-                    style={{left:colLeft(6),width:COLS[6].w}} sticky bgClass={stickyBg}/>
+                    style={{left:cl[6],width:cw[6]}} sticky bgClass={stickyBg}/>
                   <EditTextCell value={a.notes} field="notes" activity={a}
                     editing={editing} draft={draft} setDraft={setDraft}
                     startEdit={startEdit} commitEdit={commitEdit} cancelEdit={cancelEdit}
-                    style={{left:colLeft(7),width:COLS[7].w}} sticky bgClass={stickyBg}/>
+                    style={{left:cl[7],width:cw[7]}} sticky bgClass={stickyBg}/>
 
                   {/* Timeline cells */}
                   {viewUnit==='week'
@@ -1181,7 +1239,7 @@ export function GanttChart() {
                 .filter(d=>d.insertAfter===a.id)
                 .map((d,di)=>(
                   <DraftActivityRow key={d._id} draft={d} techItems={techItems} members={members}
-                    weeks={weeks} months={months} viewUnit={viewUnit}
+                    weeks={weeks} months={months} viewUnit={viewUnit} cw={cw} cl={cl}
                     onUpdate={u=>updateDraft(d._id,u)} onSave={()=>saveDraft(d)} onCancel={()=>removeDraft(d._id)}
                     rowIndex={idx*10+di}/>
                 ))
@@ -1192,7 +1250,7 @@ export function GanttChart() {
             {/* Draft rows appended at the end (head + button) */}
             {draftRows.filter(d=>d.insertAfter===undefined).map((d,di)=>(
               <DraftActivityRow key={d._id} draft={d} techItems={techItems} members={members}
-                weeks={weeks} months={months} viewUnit={viewUnit}
+                weeks={weeks} months={months} viewUnit={viewUnit} cw={cw} cl={cl}
                 onUpdate={u=>updateDraft(d._id,u)} onSave={()=>saveDraft(d)} onCancel={()=>removeDraft(d._id)}
                 rowIndex={sorted.length+di}/>
             ))}
@@ -1221,8 +1279,9 @@ function ActionBtn({children,onClick,title,color}:{children:React.ReactNode;onCl
 }
 
 // ── DraftActivityRow ──────────────────────────────────────────────────────────
-function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdate,onSave,onCancel,rowIndex}:{
+function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,cw,cl,onUpdate,onSave,onCancel,rowIndex}:{
   draft:DraftRow;techItems:TechItem[];members:Member[];weeks:WeekInfo[];months:MonthInfo[];viewUnit:'week'|'month';
+  cw:number[];cl:number[];
   onUpdate:(u:Partial<DraftRow>)=>void;onSave:()=>void;onCancel:()=>void;rowIndex:number;
 }) {
   const rowBg=rowIndex%2===0?'':'bg-slate-50/60 dark:bg-slate-800/30'
@@ -1231,7 +1290,7 @@ function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdat
   const sel=`w-full h-full px-1.5 text-[11px] border-none outline-none cursor-pointer bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 [color-scheme:light] dark:[color-scheme:dark]`
   const kd=(e:React.KeyboardEvent)=>{ if(e.key==='Enter'){e.preventDefault();onSave()} if(e.key==='Escape'){e.preventDefault();onCancel()} }
   const upd=(f:keyof DraftRow,v:string|number|null)=>{ const u:Partial<DraftRow>={[f]:v}; if(f==='completion_date'&&v) u.status='complete'; onUpdate(u) }
-  const td=`border-b border-r border-brand-200 dark:border-brand-700 sticky z-10 p-0 ${stickyBg}`
+  const td=`border-b border-r border-brand-200 dark:border-brand-700 sticky z-10 p-0 overflow-hidden whitespace-nowrap ${stickyBg}`
   return (
     <tr className={`${rowBg} ring-1 ring-inset ring-brand-200 dark:ring-brand-700`} style={{height:36}}>
       <td className={td} style={{left:0,width:ACTION_W}}>
@@ -1240,16 +1299,16 @@ function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdat
           <button onClick={onCancel} className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"><XIcon size={12}/></button>
         </div>
       </td>
-      <td className={td} style={{left:colLeft(0),width:COLS[0].w}}>
+      <td className={td} style={{left:cl[0],width:cw[0]}}>
         <select className={sel} value={draft.tech_item_id??''} onKeyDown={kd} onChange={e=>upd('tech_item_id',Number(e.target.value))}>
           <option value="">선택...</option>
           {techItems.map(ti=><option key={ti.id} value={ti.id}>{ti.name}</option>)}
         </select>
       </td>
-      <td className={td} style={{left:colLeft(1),width:COLS[1].w}}>
+      <td className={td} style={{left:cl[1],width:cw[1]}}>
         <input autoFocus className={inp} placeholder="Activity명..." value={draft.name} onKeyDown={kd} onChange={e=>upd('name',e.target.value)}/>
       </td>
-      <td className={td} style={{left:colLeft(2),width:COLS[2].w}}>
+      <td className={td} style={{left:cl[2],width:cw[2]}}>
         <div className="w-full h-full flex items-center px-1" onKeyDown={kd}>
           <SmartDateInput value={draft.start_date} maxDate={draft.end_date||undefined}
             onChange={v=>{ upd('start_date',v); if(draft.end_date&&v&&v>draft.end_date) onUpdate({end_date:v}) }}
@@ -1258,7 +1317,7 @@ function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdat
             iconSize={10}/>
         </div>
       </td>
-      <td className={td} style={{left:colLeft(3),width:COLS[3].w}}>
+      <td className={td} style={{left:cl[3],width:cw[3]}}>
         <div className="w-full h-full flex items-center px-1" onKeyDown={kd}>
           <SmartDateInput value={draft.end_date} minDate={draft.start_date||undefined}
             onChange={v=>{ upd('end_date',v); if(draft.start_date&&v&&v<draft.start_date) onUpdate({start_date:v}) }}
@@ -1267,7 +1326,7 @@ function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdat
             iconSize={10}/>
         </div>
       </td>
-      <td className={`${td} ${draft.status==='complete'&&!draft.completion_date?'ring-1 ring-inset ring-red-400':''}`} style={{left:colLeft(4),width:COLS[4].w}}>
+      <td className={`${td} ${draft.status==='complete'&&!draft.completion_date?'ring-1 ring-inset ring-red-400':''}`} style={{left:cl[4],width:cw[4]}}>
         <div className="w-full h-full flex items-center px-1" onKeyDown={kd}>
           <SmartDateInput value={draft.completion_date} minDate={draft.end_date||draft.start_date||undefined}
             onChange={v=>upd('completion_date',v)}
@@ -1276,20 +1335,20 @@ function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdat
             iconSize={10}/>
         </div>
       </td>
-      <td className={td} style={{left:colLeft(5),width:COLS[5].w}}>
+      <td className={td} style={{left:cl[5],width:cw[5]}}>
         <select className={sel} value={draft.assignee} onKeyDown={kd} onChange={e=>upd('assignee',e.target.value)}>
           <option value="">미지정</option>
           {members.map(m=><option key={m.user_id} value={m.name}>{m.name}</option>)}
         </select>
       </td>
-      <td className={td} style={{left:colLeft(6),width:COLS[6].w}}>
+      <td className={td} style={{left:cl[6],width:cw[6]}}>
         <select className={sel} value={draft.status} onKeyDown={kd} onChange={e=>upd('status',e.target.value)}>
           <option value="review">검토</option>
           <option value="in_progress">진행</option>
           <option value="complete">완료</option>
         </select>
       </td>
-      <td className={td} style={{left:colLeft(7),width:COLS[7].w}}>
+      <td className={td} style={{left:cl[7],width:cw[7]}}>
         <input className={inp} placeholder="메모" value={draft.notes} onKeyDown={kd} onChange={e=>upd('notes',e.target.value)}/>
       </td>
       {viewUnit==='week'
@@ -1305,7 +1364,7 @@ function DraftActivityRow({draft,techItems,members,weeks,months,viewUnit,onUpdat
 }
 
 // ── Editable cell components ──────────────────────────────────────────────────
-const sTd='border-b border-r border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 overflow-hidden h-9 sticky z-10'
+const sTd='border-b border-r border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 overflow-hidden whitespace-nowrap h-9 sticky z-10'
 
 interface ECBase { activity:Activity; field:string; editing:{id:number;field:string}|null; draft:string; setDraft:(v:string)=>void; startEdit:(a:Activity,f:string)=>void; commitEdit:(a:Activity)=>void; cancelEdit:()=>void; style:React.CSSProperties; sticky?:boolean; warnEmpty?:boolean; previewValue?: string|null; bgClass?:string; delayed?:boolean }
 
