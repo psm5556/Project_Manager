@@ -6,10 +6,21 @@ Project Manager 시작 스크립트 (Windows / Linux 공용)
 import subprocess
 import sys
 import os
+import platform
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(ROOT, "frontend")
 BACKEND_DIR  = os.path.join(ROOT, "backend")
+
+# 리눅스 환경일 때 tsc와 vite에 실행 권한 부여
+if platform.system() == 'Linux':
+    print("[Project Manager] Granting execute permission to tsc and vite...")
+    subprocess.run("chmod +x node_modules/.bin/tsc node_modules/.bin/vite", cwd=FRONTEND_DIR, shell=True)
+    # npm 선택적 의존성 문제 해결을 위해 package-lock.json과 node_modules 삭제 후 재설치
+    print("[Project Manager] Removing package-lock.json and node_modules for npm reinstall...")
+    subprocess.run("rm -f package-lock.json && rm -rf node_modules", cwd=FRONTEND_DIR, shell=True)
+    print("[Project Manager] Reinstalling npm packages...")
+    subprocess.run("npm install", cwd=FRONTEND_DIR, shell=True)
 
 # PyJWT 설치 여부만 확인 (Anaconda 환경에서 전체 재설치 시 pydantic-core 빌드 오류 방지)
 try:
