@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { X, Shield, ShieldOff, Trash2, KeyRound, Pencil, Check, Crown } from 'lucide-react'
+import { X, Shield, ShieldOff, Trash2, KeyRound, Pencil, Check, Crown, LayoutDashboard, Users } from 'lucide-react'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 import { adminListUsers, adminUpdateUser, adminResetPin, adminDeleteUser } from '../api'
 import { useAuth } from '../contexts/AuthContext'
 import type { User } from '../types'
+import { AdminDashboard } from './AdminDashboard'
+
+type Tab = 'dashboard' | 'users'
 
 interface Props {
   onClose: () => void
@@ -14,6 +17,7 @@ interface Props {
 export function AdminPage({ onClose }: Props) {
   const { user: me } = useAuth()
   const qc = useQueryClient()
+  const [tab, setTab] = useState<Tab>('dashboard')
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editName, setEditName] = useState('')
   const [resetPinId, setResetPinId] = useState<number | null>(null)
@@ -86,7 +90,7 @@ export function AdminPage({ onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-modal w-full max-w-2xl
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-modal w-full max-w-3xl
         border border-slate-200 dark:border-slate-700 flex flex-col max-h-[90vh]">
 
         {/* Header */}
@@ -97,7 +101,7 @@ export function AdminPage({ onClose }: Props) {
             </div>
             <div>
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">전체 관리자</h2>
-              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">사용자 계정 관리</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">시스템 관리</p>
             </div>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg
@@ -106,6 +110,17 @@ export function AdminPage({ onClose }: Props) {
           </button>
         </div>
 
+        {/* Tabs */}
+        <div className="flex border-b border-slate-200 dark:border-slate-800 px-4 pt-1">
+          <TabBtn active={tab==='dashboard'} onClick={()=>setTab('dashboard')} icon={<LayoutDashboard size={13}/>}>대시보드</TabBtn>
+          <TabBtn active={tab==='users'} onClick={()=>setTab('users')} icon={<Users size={13}/>}>사용자 관리</TabBtn>
+        </div>
+
+        {/* Dashboard tab */}
+        {tab === 'dashboard' && <AdminDashboard/>}
+
+        {/* Users tab */}
+        {tab === 'users' && <>
         {/* Search */}
         <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-800">
           <input
@@ -261,8 +276,24 @@ export function AdminPage({ onClose }: Props) {
             </div>
           )}
         </div>
+        </>}
       </div>
     </div>
+  )
+}
+
+function TabBtn({ active, onClick, icon, children }: {
+  active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode
+}) {
+  return (
+    <button onClick={onClick}
+      className={`flex items-center gap-1.5 px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors -mb-px ${
+        active
+          ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+          : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+      }`}>
+      {icon}{children}
+    </button>
   )
 }
 

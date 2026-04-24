@@ -4,8 +4,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from sqlalchemy import text
-from datetime import datetime
+from sqlalchemy import text, func
+from datetime import datetime, date, timedelta
 from typing import List, Optional
 import json
 import os
@@ -888,6 +888,100 @@ def delete_backup(
     db.delete(backup)
     db.commit()
     return {"ok": True}
+
+
+# ─── Admin Stats ─────────────────────────────────────────────────────────────
+
+@app.get("/api/admin/stats")
+def admin_stats(
+    admin: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    today = date.today()
+    week_later = today + timedelta(days=7)
+
+    total_users = db.query(func.count(models.User.id)).scalar()
+    total_projects = db.query(func.count(models.Project.id)).scalar()
+    total_activities = db.query(func.count(models.Activity.id)).scalar()
+
+    # Global status counts
+    status_rows = db.query(models.Activity.status, func.count(models.Activity.id)).group_by(models.Activity.status).all()
+    global_status = {"review": 0, "in_progress": 0, "complete": 0}
+    for status, cnt in status_rows:
+        if status in global_status:
+            global_status[status] = cnt
+
+    # Per-project stats
+    projects = db.query(models.Project).order_by(models.Project.id).all()
+    project_stats = []
+    for p in projects:
+        member_count = db.query(func.count(models.ProjectMember.id)).filter(
+            models.ProjectMember.project_id == p.id
+        ).scalar()
+        act_rows = db.query(models.Activity.status, func.count(models.Activity.id))\
+            .join(models.TechItem, models.Activity.tech_item_id == models.TechItem.id)\
+            .filter(models.TechItem.project_id == p.id)\
+            .group_by(models.Activity.status).all()
+        counts = {"review": 0, "in_progress": 0, "complete": 0}
+        for s, c in act_rows:
+            if s in counts:
+                counts[s] = c
+        total = sum(counts.values())
+        rate = round(counts["complete"] / total * 100) if total > 0 else 0
+        project_stats.append({
+            "id": p.id, "name": p.name,
+            "member_count": member_count,
+            "total": total, **counts, "rate": rate,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+        })
+
+    # Overdue: end_date < today, not complete
+    overdue_acts = db.query(models.Activity, models.TechItem, models.Project)\
+        .join(models.TechItem, models.Activity.tech_item_id == models.TechItem.id)\
+        .join(models.Project, models.TechItem.project_id == models.Project.id)\
+        .filter(models.Activity.end_date < today, models.Activity.status != "complete")\
+        .order_by(models.Activity.end_date).all()
+    overdue = [{"id": a.id, "name": a.name, "end_date": str(a.end_date),
+                "status": a.status, "assignee": a.assignee,
+                "project_name": p.name} for a, ti, p in overdue_acts]
+
+    # Due soon: today <= end_date <= today+7, not complete
+    due_soon_acts = db.query(models.Activity, models.TechItem, models.Project)\
+        .join(models.TechItem, models.Activity.tech_item_id == models.TechItem.id)\
+        .join(models.Project, models.TechItem.project_id == models.Project.id)\
+        .filter(models.Activity.end_date >= today, models.Activity.end_date <= week_later,
+                models.Activity.status != "complete")\
+        .order_by(models.Activity.end_date).all()
+    due_soon = [{"id": a.id, "name": a.name, "end_date": str(a.end_date),
+                 "status": a.status, "assignee": a.assignee,
+                 "project_name": p.name} for a, ti, p in due_soon_acts]
+
+    # User stats
+    users = db.query(models.User).order_by(models.User.id).all()
+    user_stats = []
+    for u in users:
+        project_count = db.query(func.count(models.ProjectMember.id)).filter(
+            models.ProjectMember.user_id == u.id
+        ).scalar()
+        assigned_count = db.query(func.count(models.Activity.id)).filter(
+            models.Activity.assignee == u.name
+        ).scalar()
+        user_stats.append({
+            "user_id": u.id, "name": u.name, "knox_id": u.knox_id,
+            "is_admin": u.is_admin,
+            "project_count": project_count, "assigned_count": assigned_count,
+        })
+
+    return {
+        "total_users": total_users,
+        "total_projects": total_projects,
+        "total_activities": total_activities,
+        "global_status": global_status,
+        "project_stats": project_stats,
+        "overdue": overdue,
+        "due_soon": due_soon,
+        "user_stats": user_stats,
+    }
 
 
 # ─── Static frontend ──────────────────────────────────────────────────────────

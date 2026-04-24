@@ -64,3 +64,44 @@ export interface Backup {
 }
 
 export type ViewMode = 'gantt' | 'kanban'
+
+export interface AdminProjectStat {
+  id: number
+  name: string
+  member_count: number
+  total: number
+  review: number
+  in_progress: number
+  complete: number
+  rate: number
+  created_at: string | null
+}
+
+export interface AdminAlertActivity {
+  id: number
+  name: string
+  end_date: string
+  status: string
+  assignee: string
+  project_name: string
+}
+
+export interface AdminUserStat {
+  user_id: number
+  name: string
+  knox_id: string
+  is_admin: boolean
+  project_count: number
+  assigned_count: number
+}
+
+export interface AdminStats {
+  total_users: number
+  total_projects: number
+  total_activities: number
+  global_status: { review: number; in_progress: number; complete: number }
+  project_stats: AdminProjectStat[]
+  overdue: AdminAlertActivity[]
+  due_soon: AdminAlertActivity[]
+  user_stats: AdminUserStat[]
+}

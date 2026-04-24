@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { Project, TechItem, Activity, User, Member, Backup } from '../types'
+import type { Project, TechItem, Activity, User, Member, Backup, AdminStats } from '../types'
 
 const api = axios.create({ baseURL: '/api' })
 
@@ -57,6 +57,9 @@ export const adminResetPin = (id: number, new_pin: string) =>
 
 export const adminDeleteUser = (id: number) =>
   api.delete(`/admin/users/${id}`)
+
+export const getAdminStats = () =>
+  api.get<AdminStats>('/admin/stats').then(r => r.data)
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
 
